@@ -208,8 +208,8 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => () => videoStore.clear(), 'chat enhancement video cache')
   ctx.inject(['attachments'], applyShowImageTool)
   applyShowVideoTool(ctx, videoStore)
-  ctx.inject(['agents'], (agentCtx) => {
-    new ChatMediaService(agentCtx)
-    new ChatMarkdownService(agentCtx)
+  ctx.inject(['agents'], () => {
+    new ChatMediaService(ctx)
+    new ChatMarkdownService(ctx)
   })
 }

@@ -24,6 +24,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(host, /maxMarkdownBytes/)
   assert.ok(host.indexOf('const ChatMediaService = createMediaService') < host.indexOf("ctx.inject(['agents']"))
   assert.ok(host.indexOf('const ChatMarkdownService = createMarkdownService') < host.indexOf("ctx.inject(['agents']"))
+  assert.match(host, /ctx\.inject\(\['agents'\], \(\) => \{\n    new ChatMediaService\(ctx\)\n    new ChatMarkdownService\(ctx\)/)
   assert.match(host, /required: \['token', 'mediaType', 'name', 'bytes'\]/)
   assert.doesNotMatch(host, /token: \{ type: 'string', required: true \}/)
 })
