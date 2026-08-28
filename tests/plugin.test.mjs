@@ -4,34 +4,35 @@ import test from 'node:test'
 
 const root = new URL('..', import.meta.url)
 
-test('declares a web bundle and the read_image tool view', async () => {
+test('declares the media bundle and browser tool views', async () => {
   const manifest = JSON.parse(await readFile(new URL('./package.json', root), 'utf8'))
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
-  const host = await readFile(new URL('./lib/index.js', root), 'utf8')
+  const host = await readFile(new URL('./src/index.js', root), 'utf8')
 
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(manifest.dsh.client.platform, 'web')
-  assert.match(client, /'read_image', 'show_image'/)
+  assert.match(client, /'read_image', 'show_image', 'show_video'/)
   assert.match(client, /readAttachment/)
   assert.doesNotMatch(client, /file:\/\//)
   assert.match(host, /name: 'show_image'/)
+  assert.match(host, /name: 'show_video'/)
   assert.match(host, /attachments\.saveImage/)
 })
 
 test('show_image stores an attachment and returns only its reference', async () => {
   const { apply } = await import(new URL('./lib/index.js', root))
-  let tool
+  const tools = new Map()
   const context = {
-    tools: { register(value) { tool = value } },
+    tools: { register(value) { tools.set(value.name, value) } },
     fs: {
       async resolve(filePath, options) {
-        assert.equal(filePath, 'image.png')
+        assert.ok(filePath === 'image.png' || filePath === 'clip.mp4')
         assert.equal(options.cwd, 'C:/workspace')
-        return { displayPath: 'C:/workspace/image.png' }
+        return { displayPath: `C:/workspace/${filePath}` }
       },
       async stat() { return { type: 'file' } },
       async readBytes(_target, _signal, maxBytes) {
-        assert.equal(maxBytes, 1024)
+        assert.ok(maxBytes === 1024 || maxBytes === 4)
         return Uint8Array.of(1, 2, 3)
       },
     },
@@ -42,17 +43,27 @@ test('show_image stores an attachment and returns only its reference', async () 
         return { attachmentId: 'sha256:test', mediaType: input.mediaType, bytes: 3, width: 1, height: 1, name: input.name }
       },
     },
-    inject(_services, callback) { callback(this) },
+    effect() {},
+    inject(services, callback) {
+      if (services.includes('attachments')) callback(this)
+    },
   }
 
-  apply(context)
-  assert.equal(tool.name, 'show_image')
-  const value = await tool.execute({ file_path: 'image.png' }, { agent: { session: { header: { cwd: 'C:/workspace' } } }, signal: new AbortController().signal })
-  const [content] = tool.output.render({}, value)
+  apply(context, { maxVideoBytes: 4 })
+  const imageTool = tools.get('show_image')
+  assert.equal(imageTool.name, 'show_image')
+  const value = await imageTool.execute({ file_path: 'image.png' }, { agent: { id: 'session-a', session: { header: { cwd: 'C:/workspace' } } }, signal: new AbortController().signal })
+  const [content] = imageTool.output.render({}, value)
   assert.equal(content.type, 'text')
   assert.deepEqual(JSON.parse(content.text), {
     type: 'dsh-chat-enhancement/image',
     path: 'C:/workspace/image.png',
     attachment: { attachmentId: 'sha256:test', mediaType: 'image/png', bytes: 3, width: 1, height: 1, name: 'image.png' },
   })
+
+  const videoTool = tools.get('show_video')
+  const video = await videoTool.execute({ file_path: 'clip.mp4' }, { agent: { id: 'session-a', session: { header: { cwd: 'C:/workspace' } } }, signal: new AbortController().signal })
+  assert.equal(video.mediaType, 'video/mp4')
+  assert.equal(video.bytes, 3)
+  assert.match(videoTool.output.render({}, video)[0].text, /dsh-chat-enhancement\/video/)
 })
