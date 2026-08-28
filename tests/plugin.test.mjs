@@ -8,9 +8,11 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   const manifest = JSON.parse(await readFile(new URL('./package.json', root), 'utf8'))
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
   const host = await readFile(new URL('./src/index.js', root), 'utf8')
+  const typertHost = await readFile(new URL('./src/typert.host.js', root), 'utf8')
 
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(manifest.dsh.client.platform, 'web')
+  assert.equal(manifest.exports['./typert'], './lib/typert.host.js')
   assert.match(client, /'read_image', 'show_image', 'show_video'/)
   assert.match(client, /MarkdownText/)
   assert.match(client, /conversation\.input\.dock/)
@@ -27,6 +29,9 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(host, /ctx\.inject\(\['agents'\], \(\) => \{\n    new ChatMediaService\(ctx\)\n    new ChatMarkdownService\(ctx\)/)
   assert.match(host, /required: \['token', 'mediaType', 'name', 'bytes'\]/)
   assert.doesNotMatch(host, /token: \{ type: 'string', required: true \}/)
+  assert.match(typertHost, /chatMedia/)
+  assert.match(typertHost, /chatMarkdown/)
+  assert.match(typertHost, /typeSymbol: requestSymbol/)
 })
 
 test('show_image stores an attachment and returns only its reference', async () => {
