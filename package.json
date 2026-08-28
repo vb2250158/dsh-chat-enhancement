@@ -1,0 +1,47 @@
+{
+  "name": "dsh-chat-enhancement",
+  "version": "0.1.0",
+  "description": "Inline previews for DSH chat tool results",
+  "type": "module",
+  "main": "lib/client.js",
+  "exports": {
+    ".": "./lib/client.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1",
+    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.8",
+    "react": "^18.2.0"
+  },
+  "files": [
+    "lib/client.js",
+    "src/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test tests/plugin.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vb2250158/dsh-chat-enhancement.git"
+  },
+  "license": "MIT"
+}
