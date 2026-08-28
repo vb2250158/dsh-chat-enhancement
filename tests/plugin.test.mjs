@@ -4,7 +4,7 @@ import test from 'node:test'
 
 const root = new URL('..', import.meta.url)
 
-test('declares the media bundle and browser tool views', async () => {
+test('declares the media bundle, browser previews, and bounded Markdown reader', async () => {
   const manifest = JSON.parse(await readFile(new URL('./package.json', root), 'utf8'))
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
   const host = await readFile(new URL('./src/index.js', root), 'utf8')
@@ -12,11 +12,16 @@ test('declares the media bundle and browser tool views', async () => {
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(manifest.dsh.client.platform, 'web')
   assert.match(client, /'read_image', 'show_image', 'show_video'/)
+  assert.match(client, /MarkdownText/)
+  assert.match(client, /conversation\.input\.dock/)
   assert.match(client, /readAttachment/)
   assert.doesNotMatch(client, /file:\/\//)
   assert.match(host, /name: 'show_image'/)
   assert.match(host, /name: 'show_video'/)
   assert.match(host, /attachments\.saveImage/)
+  assert.match(host, /chatMarkdown/)
+  assert.match(host, /ctx\.fs\.contains/)
+  assert.match(host, /maxMarkdownBytes/)
 })
 
 test('show_image stores an attachment and returns only its reference', async () => {

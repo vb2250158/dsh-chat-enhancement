@@ -15,14 +15,18 @@ const IMAGE_MEDIA_TYPES = {
 
 const VIDEO_MEDIA_TYPES = { '.mp4': 'video/mp4', '.webm': 'video/webm' }
 const DEFAULT_MAX_VIDEO_BYTES = 50 * 1024 * 1024
+const DEFAULT_MAX_MARKDOWN_BYTES = 2 * 1024 * 1024
 
 const imageMediaTypeFor = (filePath) => IMAGE_MEDIA_TYPES[extname(filePath).toLowerCase()]
 const videoMediaTypeFor = (filePath) => VIDEO_MEDIA_TYPES[extname(filePath).toLowerCase()]
+const isMarkdownPath = (filePath) => ['.md', '.markdown'].includes(extname(filePath).toLowerCase())
 
 function resolveConfig(config = {}) {
   const maxVideoBytes = config.maxVideoBytes ?? DEFAULT_MAX_VIDEO_BYTES
   if (!Number.isSafeInteger(maxVideoBytes) || maxVideoBytes < 1) throw new TypeError('maxVideoBytes must be a positive safe integer.')
-  return { maxVideoBytes }
+  const maxMarkdownBytes = config.maxMarkdownBytes ?? DEFAULT_MAX_MARKDOWN_BYTES
+  if (!Number.isSafeInteger(maxMarkdownBytes) || maxMarkdownBytes < 1) throw new TypeError('maxMarkdownBytes must be a positive safe integer.')
+  return { maxVideoBytes, maxMarkdownBytes }
 }
 
 const imagePreviewMarker = (value) => JSON.stringify({ type: 'dsh-chat-enhancement/image', path: value.path, attachment: value.image })
@@ -102,6 +106,55 @@ function createMediaService(protocol, videoStore) {
   return ChatMediaService
 }
 
+function parseMarkdownRequest(request) {
+  if (request === null || typeof request !== 'object' || Array.isArray(request)) throw new TypeError('Markdown preview request is invalid.')
+  const { sessionId, path } = request
+  if (typeof sessionId !== 'string' || sessionId === '' || typeof path !== 'string' || path.trim() === '') {
+    throw new TypeError('Markdown preview request is invalid.')
+  }
+  if (!isMarkdownPath(path)) throw new Error('Markdown preview accepts .md or .markdown files only.')
+  return { sessionId, path }
+}
+
+async function readMarkdown(ctx, maxMarkdownBytes, request) {
+  const { sessionId, path } = parseMarkdownRequest(request)
+  const agent = ctx.agents.get(sessionId)
+  if (agent === undefined) throw new Error('当前会话未加载，无法预览 Markdown。')
+  const cwd = agent.session.header.cwd
+  if (cwd === undefined) throw new Error('当前会话没有工作目录，无法预览 Markdown。')
+  const [workspace, target] = await Promise.all([
+    ctx.fs.resolve('.', { cwd }),
+    ctx.fs.resolve(path, { cwd }),
+  ])
+  if (!ctx.fs.contains(workspace, target)) throw new Error('Markdown 预览只能读取当前会话工作目录内的文件。')
+  const info = await ctx.fs.stat(target)
+  if (info === undefined) throw new Error(`cannot preview "${target.displayPath}": file not found`)
+  if (info.type !== 'file') throw new Error(`cannot preview "${target.displayPath}": not a regular file`)
+  const bytes = await ctx.fs.readBytes(target, undefined, maxMarkdownBytes)
+  let text
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    throw new Error('Markdown preview requires UTF-8 text.')
+  }
+  return { name: basename(target.displayPath), text }
+}
+
+function createMarkdownService(protocol, ctx, maxMarkdownBytes) {
+  const initializers = []
+  class ChatMarkdownService extends protocol.TypertRemoteService {
+    constructor(agentCtx) {
+      super(agentCtx, 'chatMarkdown')
+      for (const initialize of initializers) initialize.call(this)
+    }
+    async read(request) { return await readMarkdown(ctx, maxMarkdownBytes, request) }
+  }
+  protocol.Remote('read')(ChatMarkdownService.prototype.read, {
+    private: false, static: false, name: 'read', addInitializer(initializer) { initializers.push(initializer) },
+  })
+  return ChatMarkdownService
+}
+
 function profileProtocol() {
   const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
   const profileRequire = createRequire(join(dshHome, 'profiles', 'web', 'package.json'))
@@ -139,16 +192,19 @@ function applyShowVideoTool(ctx, videoStore) {
 }
 
 export const name = 'chat-enhancement'
-export const inject = ['tools', 'fs']
+export const inject = ['tools', 'fs', 'agents']
 
 /** Compose Agent media tools and the current-session video reader. */
 export function apply(ctx, config = {}) {
-  const videoStore = new VideoStore(resolveConfig(config).maxVideoBytes)
+  const resolved = resolveConfig(config)
+  const videoStore = new VideoStore(resolved.maxVideoBytes)
   ctx.effect(() => () => videoStore.clear(), 'chat enhancement video cache')
   ctx.inject(['attachments'], applyShowImageTool)
   applyShowVideoTool(ctx, videoStore)
   ctx.inject(['agents'], (agentCtx) => {
     const ChatMediaService = createMediaService(profileProtocol(), videoStore)
+    const ChatMarkdownService = createMarkdownService(profileProtocol(), ctx, resolved.maxMarkdownBytes)
     new ChatMediaService(agentCtx)
+    new ChatMarkdownService(agentCtx)
   })
 }
