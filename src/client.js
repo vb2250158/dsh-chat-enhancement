@@ -16,9 +16,20 @@ function pathFromArgs(argsRaw) {
   }
 }
 
-function imageFromBlock(block) {
+function previewFromBlock(block) {
   if (!('kind' in block)) return null
-  return block.content.find(part => part.type === 'image')?.attachment ?? null
+  const image = block.content.find(part => part.type === 'image')?.attachment
+  if (image !== undefined) return { attachment: image, path: null }
+  for (const part of block.content) {
+    if (part.type !== 'text') continue
+    try {
+      const marker = JSON.parse(part.text)
+      if (marker?.type === 'dsh-chat-enhancement/image' && marker.attachment !== null && typeof marker.attachment === 'object') {
+        return { attachment: marker.attachment, path: typeof marker.path === 'string' ? marker.path : null }
+      }
+    } catch {}
+  }
+  return null
 }
 
 function useAttachmentUrl(sessionId, attachment, sessions) {
@@ -81,9 +92,10 @@ function ImagePreview({ sessionId, attachment, sessions }) {
   )
 }
 
-function ReadImageView({ block, sessionId, sessions }) {
-  const attachment = imageFromBlock(block)
-  const path = pathFromArgs(block.argsRaw ?? block.call?.argsRaw ?? '')
+function ImageToolView({ block, sessionId, sessions }) {
+  const preview = previewFromBlock(block)
+  const attachment = preview?.attachment ?? null
+  const path = preview?.path ?? pathFromArgs(block.argsRaw ?? block.call?.argsRaw ?? '')
   const title = attachment === null ? '读取图片' : `读取图片 · ${path}`
   const summary = attachment === null
     ? ('kind' in block && block.isError ? '读取失败' : '正在读取…')
@@ -102,9 +114,7 @@ export const inject = ['slots', 'sessions']
 export function apply(ctx) {
   const sessions = ctx.get('sessions')
   if (sessions === undefined) throw new Error('dsh-chat-enhancement requires the sessions service.')
-  ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
-    name: 'tool.call.toolview',
-    key: 'read_image',
-    locale: 'conversation',
-  }, (props) => React.createElement(ReadImageView, { ...props, sessions })))
+  for (const key of ['read_image', 'show_image']) {
+    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, locale: 'conversation' }, (props) => React.createElement(ImageToolView, { ...props, sessions })))
+  }
 }

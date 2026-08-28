@@ -1,11 +1,11 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
-  "main": "lib/client.js",
+  "main": "lib/index.js",
   "exports": {
-    ".": "./lib/client.js",
+    ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
@@ -30,7 +30,9 @@
     "react": "^18.2.0"
   },
   "files": [
+    "lib/index.js",
     "lib/client.js",
+    "src/index.js",
     "src/client.js",
     "cordis.patch.yml",
     "README.md",
