@@ -22,6 +22,8 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(host, /chatMarkdown/)
   assert.match(host, /ctx\.fs\.contains/)
   assert.match(host, /maxMarkdownBytes/)
+  assert.match(host, /required: \['token', 'mediaType', 'name', 'bytes'\]/)
+  assert.doesNotMatch(host, /token: \{ type: 'string', required: true \}/)
 })
 
 test('show_image stores an attachment and returns only its reference', async () => {

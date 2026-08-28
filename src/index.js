@@ -33,18 +33,18 @@ const imagePreviewMarker = (value) => JSON.stringify({ type: 'dsh-chat-enhanceme
 const videoPreviewMarker = (value) => JSON.stringify({ type: 'dsh-chat-enhancement/video', token: value.token, mediaType: value.mediaType, name: value.name, bytes: value.bytes })
 
 function imageOutputSchema() {
-  return { type: 'object', additionalProperties: false, properties: {
-    path: { type: 'string', required: true },
-    image: { type: 'object', additionalProperties: false, required: true, properties: {
-      attachmentId: { type: 'string', required: true }, mediaType: { type: 'string', required: true }, bytes: { type: 'integer', required: true },
-      width: { type: 'integer', required: true }, height: { type: 'integer', required: true }, name: { type: 'string' },
+  return { type: 'object', additionalProperties: false, required: ['path', 'image'], properties: {
+    path: { type: 'string' },
+    image: { type: 'object', additionalProperties: false, required: ['attachmentId', 'mediaType', 'bytes', 'width', 'height'], properties: {
+      attachmentId: { type: 'string' }, mediaType: { type: 'string' }, bytes: { type: 'integer' },
+      width: { type: 'integer' }, height: { type: 'integer' }, name: { type: 'string' },
     } },
   } }
 }
 
 function videoOutputSchema() {
-  return { type: 'object', additionalProperties: false, properties: {
-    token: { type: 'string', required: true }, mediaType: { type: 'string', required: true }, name: { type: 'string', required: true }, bytes: { type: 'integer', required: true },
+  return { type: 'object', additionalProperties: false, required: ['token', 'mediaType', 'name', 'bytes'], properties: {
+    token: { type: 'string' }, mediaType: { type: 'string' }, name: { type: 'string' }, bytes: { type: 'integer' },
   } }
 }
 
