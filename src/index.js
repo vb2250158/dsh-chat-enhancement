@@ -155,12 +155,16 @@ function createMarkdownService(protocol, ctx, maxMarkdownBytes) {
   return ChatMarkdownService
 }
 
+let cachedProfileProtocol
+
 function profileProtocol() {
+  if (cachedProfileProtocol !== undefined) return cachedProfileProtocol
   const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
   const profileRequire = createRequire(join(dshHome, 'profiles', 'web', 'package.json'))
   const protocol = profileRequire('@deepseek-ai/dsh-typert-protocol')
   if (typeof protocol.TypertRemoteService !== 'function' || typeof protocol.Remote !== 'function') throw new Error('dsh-chat-enhancement requires the profile Typert protocol.')
-  return protocol
+  cachedProfileProtocol = protocol
+  return cachedProfileProtocol
 }
 
 /** Register the Agent-visible image presentation tool while attachments are available. */
@@ -198,12 +202,13 @@ export const inject = ['tools', 'fs', 'agents']
 export function apply(ctx, config = {}) {
   const resolved = resolveConfig(config)
   const videoStore = new VideoStore(resolved.maxVideoBytes)
+  const protocol = profileProtocol()
+  const ChatMediaService = createMediaService(protocol, videoStore)
+  const ChatMarkdownService = createMarkdownService(protocol, ctx, resolved.maxMarkdownBytes)
   ctx.effect(() => () => videoStore.clear(), 'chat enhancement video cache')
   ctx.inject(['attachments'], applyShowImageTool)
   applyShowVideoTool(ctx, videoStore)
   ctx.inject(['agents'], (agentCtx) => {
-    const ChatMediaService = createMediaService(profileProtocol(), videoStore)
-    const ChatMarkdownService = createMarkdownService(profileProtocol(), ctx, resolved.maxMarkdownBytes)
     new ChatMediaService(agentCtx)
     new ChatMarkdownService(agentCtx)
   })

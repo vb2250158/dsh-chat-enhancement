@@ -12,7 +12,7 @@
 - 浏览器通过会话授权的 `readAttachment` 获取字节，并在内存中创建、释放 `blob:` URL。
 - 不读取 `file://`，不直接访问本机或 NAS 路径，不保存文件内容或个人配置。
 
-视频缓存仅在 DSH 运行期间有效，且默认单文件上限为 50 MiB。Markdown 默认读取上限为 2 MiB。可通过该插件的 `maxVideoBytes`、`maxMarkdownBytes` 配置调整；不要把本机路径、NAS 路径或凭据写入共享配置。PDF 和音频仍需要各自受管的读取协议。
+视频缓存仅在 DSH 运行期间有效，且默认单文件上限为 50 MiB。Markdown 默认读取上限为 2 MiB。可通过该插件的 `maxVideoBytes`、`maxMarkdownBytes` 配置调整；不要把本机路径、NAS 路径或凭据写入共享配置。Remote 预览服务在插件加载时完成注册，已存在和后续打开的会话均通过相同的 Host 端点读取预览数据。PDF 和音频仍需要各自受管的读取协议。
 
 ## 安装
 
