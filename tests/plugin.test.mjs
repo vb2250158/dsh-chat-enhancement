@@ -17,3 +17,42 @@ test('declares a web bundle and the read_image tool view', async () => {
   assert.match(host, /name: 'show_image'/)
   assert.match(host, /attachments\.saveImage/)
 })
+
+test('show_image stores an attachment and returns only its reference', async () => {
+  const { apply } = await import(new URL('./lib/index.js', root))
+  let tool
+  const context = {
+    tools: { register(value) { tool = value } },
+    fs: {
+      async resolve(filePath, options) {
+        assert.equal(filePath, 'image.png')
+        assert.equal(options.cwd, 'C:/workspace')
+        return { displayPath: 'C:/workspace/image.png' }
+      },
+      async stat() { return { type: 'file' } },
+      async readBytes(_target, _signal, maxBytes) {
+        assert.equal(maxBytes, 1024)
+        return Uint8Array.of(1, 2, 3)
+      },
+    },
+    attachments: {
+      imageLimits: { maxImageBytes: 1024 },
+      async saveImage(input) {
+        assert.deepEqual([...input.data], [1, 2, 3])
+        return { attachmentId: 'sha256:test', mediaType: input.mediaType, bytes: 3, width: 1, height: 1, name: input.name }
+      },
+    },
+    inject(_services, callback) { callback(this) },
+  }
+
+  apply(context)
+  assert.equal(tool.name, 'show_image')
+  const value = await tool.execute({ file_path: 'image.png' }, { agent: { session: { header: { cwd: 'C:/workspace' } } }, signal: new AbortController().signal })
+  const [content] = tool.output.render({}, value)
+  assert.equal(content.type, 'text')
+  assert.deepEqual(JSON.parse(content.text), {
+    type: 'dsh-chat-enhancement/image',
+    path: 'C:/workspace/image.png',
+    attachment: { attachmentId: 'sha256:test', mediaType: 'image/png', bytes: 3, width: 1, height: 1, name: 'image.png' },
+  })
+})
