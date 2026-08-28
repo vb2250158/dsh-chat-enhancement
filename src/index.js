@@ -48,6 +48,15 @@ function videoOutputSchema() {
   } }
 }
 
+function filePathParameters(description) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['file_path'],
+    properties: { file_path: { type: 'string', description } },
+  }
+}
+
 async function resolveRegularTarget(ctx, args, exec) {
   const target = await ctx.fs.resolve(args.file_path, {
     ...(exec.agent?.session.header.cwd === undefined ? {} : { cwd: exec.agent.session.header.cwd }),
@@ -172,7 +181,7 @@ function applyShowImageTool(ctx) {
   ctx.tools.register({
     name: 'show_image',
     description: 'Display a PNG, JPEG, WebP, or GIF image to the user in the chat. Use this when the user asks to see an existing image or when an image result should be presented visually. This tool does not modify the image.',
-    parameters: { file_path: { type: 'string', required: true, description: 'Image path, resolved relative to the current session workspace.' } },
+    parameters: filePathParameters('Image path, resolved relative to the current session workspace.'),
     output: { schema: imageOutputSchema(), render: (_args, value) => [{ type: 'text', text: imagePreviewMarker(value) }] },
     async execute(args, exec) {
       const mediaType = imageMediaTypeFor(args.file_path)
@@ -189,7 +198,7 @@ function applyShowVideoTool(ctx, videoStore) {
   ctx.tools.register({
     name: 'show_video',
     description: 'Display an MP4 or WebM video to the user in the chat. Use this when the user asks to watch an existing video or when a video result should be presented visually. The video is available only to the current session while DSH remains running.',
-    parameters: { file_path: { type: 'string', required: true, description: 'Video path, resolved relative to the current session workspace.' } },
+    parameters: filePathParameters('Video path, resolved relative to the current session workspace.'),
     output: { schema: videoOutputSchema(), render: (_args, value) => [{ type: 'text', text: videoPreviewMarker(value) }] },
     execute: (args, exec) => videoStore.add(ctx, args, exec),
   })

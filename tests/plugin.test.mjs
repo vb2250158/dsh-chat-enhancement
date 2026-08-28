@@ -67,6 +67,12 @@ test('show_image stores an attachment and returns only its reference', async () 
   apply(context, { maxVideoBytes: 4 })
   const imageTool = tools.get('show_image')
   assert.equal(imageTool.name, 'show_image')
+  assert.deepEqual(imageTool.parameters, {
+    type: 'object',
+    additionalProperties: false,
+    required: ['file_path'],
+    properties: { file_path: { type: 'string', description: 'Image path, resolved relative to the current session workspace.' } },
+  })
   const value = await imageTool.execute({ file_path: 'image.png' }, { agent: { id: 'session-a', session: { header: { cwd: 'C:/workspace' } } }, signal: new AbortController().signal })
   const [content] = imageTool.output.render({}, value)
   assert.equal(content.type, 'text')
@@ -77,6 +83,12 @@ test('show_image stores an attachment and returns only its reference', async () 
   })
 
   const videoTool = tools.get('show_video')
+  assert.deepEqual(videoTool.parameters, {
+    type: 'object',
+    additionalProperties: false,
+    required: ['file_path'],
+    properties: { file_path: { type: 'string', description: 'Video path, resolved relative to the current session workspace.' } },
+  })
   const video = await videoTool.execute({ file_path: 'clip.mp4' }, { agent: { id: 'session-a', session: { header: { cwd: 'C:/workspace' } } }, signal: new AbortController().signal })
   assert.equal(video.mediaType, 'video/mp4')
   assert.equal(video.bytes, 3)
