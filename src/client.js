@@ -195,17 +195,13 @@ function GenericToolView({ toolName, block }) {
   )
 }
 
-function CollapsibleToolCall({ renderSlot, block, selectedCallId, cwd, openFile, inspectCall }) {
+function isMediaToolName(toolName) {
+  return ['read_image', 'show_image', 'show_video'].includes(toolName)
+}
+
+function CollapsibleToolCall({ block, sessionId, sessions, readVideo }) {
   const [expanded, setExpanded] = React.useState(false)
   const toolName = toolNameFromBlock(block)
-  const owner = {
-    callId: block.callId,
-    toolName,
-    block,
-    cwd,
-    openFile,
-    inspect: () => { inspectCall(block.callId) },
-  }
   const subCalls = block.subCalls ?? []
   const state = 'kind' in block ? (block.isError ? '失败' : '完成') : '运行中'
   return React.createElement('section', { 'data-dsh-chat-enhancement': 'tool-group', style: toolGroupStyle },
@@ -219,31 +215,26 @@ function CollapsibleToolCall({ renderSlot, block, selectedCallId, cwd, openFile,
     React.createElement('span', null, `工具调用 · ${toolName}`),
     React.createElement('span', { style: { ...mutedStyle, marginLeft: 'auto' } }, state)),
     expanded && React.createElement('div', { style: toolGroupBodyStyle },
-      renderSlot('tool.call.toolview', owner, {
-        entryKey: toolName,
-        fallback: React.createElement(GenericToolView, { toolName, block }),
-      }),
+      isMediaToolName(toolName)
+        ? React.createElement(MediaToolView, { block, sessionId, sessions, readVideo })
+        : React.createElement(GenericToolView, { toolName, block }),
       subCalls.map(child => React.createElement(CollapsibleToolCall, {
         key: child.callId,
-        renderSlot,
         block: child,
-        selectedCallId,
-        cwd,
-        openFile,
-        inspectCall,
+        sessionId,
+        sessions,
+        readVideo,
       })),
     ),
   )
 }
 
-function CollapsibleToolCallTree({ renderSlot, node, selectedCallId, cwd, openFile, inspectCall }) {
+function CollapsibleToolCallTree({ node, sessionId, sessions, readVideo }) {
   return React.createElement(CollapsibleToolCall, {
-    renderSlot,
     block: node.data.root,
-    selectedCallId,
-    cwd,
-    openFile,
-    inspectCall,
+    sessionId,
+    sessions,
+    readVideo,
   })
 }
 
@@ -299,11 +290,8 @@ export async function apply(ctx) {
     key: 'tool-call',
     priority: -1,
     locale: 'conversation',
-    children: { 'tool.call.toolview': { kind: 'keyed', scope: 'session' } },
+    inject: () => ({ sessions, readVideo }),
   }, CollapsibleToolCallTree))
-  for (const key of ['read_image', 'show_image', 'show_video']) {
-    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, locale: 'conversation' }, (props) => React.createElement(MediaToolView, { ...props, sessions, readVideo })))
-  }
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'chat-enhancement-markdown-preview', order: 100,
     inject: () => ({ readMarkdown }),

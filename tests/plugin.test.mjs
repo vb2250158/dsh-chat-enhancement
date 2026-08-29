@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import vm from 'node:vm'
 
 const root = new URL('..', import.meta.url)
 
@@ -13,12 +14,13 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(manifest.dsh.client.platform, 'web')
   assert.equal(manifest.exports['./typert'], './lib/typert.host.js')
-  assert.match(client, /'read_image', 'show_image', 'show_video'/)
+  assert.match(client, /read_image.*show_image.*show_video/s)
   assert.match(client, /MarkdownText/)
   assert.match(client, /conversation\.input\.dock/)
   assert.match(client, /key: 'tool-call', priority: -1/)
   assert.match(client, /CollapsibleToolCallTree/)
   assert.match(client, /aria-expanded/)
+  assert.doesNotMatch(client, /children: \{ 'tool\.call\.toolview'/)
   assert.match(client, /readAttachment/)
   assert.doesNotMatch(client, /file:\/\//)
   assert.match(host, /name: 'show_image'/)
@@ -96,4 +98,39 @@ test('show_image stores an attachment and returns only its reference', async () 
   assert.equal(video.mediaType, 'video/mp4')
   assert.equal(video.bytes, 3)
   assert.match(videoTool.output.render({}, video)[0].text, /dsh-chat-enhancement\/video/)
+})
+
+test('client shadows the tool-call node without redeclaring its child slot', async () => {
+  const client = await readFile(new URL('./lib/client.js', root), 'utf8')
+  let loaderEntry
+  vm.runInNewContext(client, {
+    window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
+  })
+  const plugin = loaderEntry.factory((name) => {
+    if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {} }
+    throw new Error(`unexpected browser dependency: ${name}`)
+  })
+  const registrations = []
+  const context = {
+    remote: { async $mount() { return () => {} } },
+    get(name) { return name === 'sessions' ? { binding() {} } : undefined },
+    reflect: { get(name) {
+      if (name === 'remote.chatMedia') return { async read() { return { ok: true, value: {} } } }
+      if (name === 'remote.chatMarkdown') return { async read() { return { ok: true, value: {} } } }
+      return undefined
+    } },
+    slots: {
+      inject(_name, callback) { callback() },
+      register(options, component) { registrations.push({ options, component }); return () => {} },
+    },
+  }
+
+  await plugin.apply(context)
+  const toolNode = registrations.find(({ options }) => options.name === 'conversation.chat.node')
+  assert.equal(toolNode.options.key, 'tool-call')
+  assert.equal(toolNode.options.priority, -1)
+  assert.equal(toolNode.options.children, undefined)
+  assert.equal(typeof toolNode.options.inject, 'function')
+  assert.equal(toolNode.component.name, 'CollapsibleToolCallTree')
 })
