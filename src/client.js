@@ -177,9 +177,30 @@ function isRunningActivity(row) {
   return row.querySelector('[data-state="running"]') !== null
 }
 
+function inlineRunningActivity(row, button, inlineRows) {
+  const content = [...row.children].find(child => child !== button) ?? null
+  Object.assign(row.style, { alignItems: 'center', display: 'flex', gap: '8px' })
+  if (content !== null) Object.assign(content.style, { flex: '1 1 auto', minWidth: '0' })
+  button.style.flex = '0 0 auto'
+  button.style.width = 'auto'
+  row.insertBefore(button, content)
+  inlineRows.set(row, content)
+}
+
+function clearInlineRunningActivity(row, content) {
+  row.style.alignItems = ''
+  row.style.display = ''
+  row.style.gap = ''
+  if (content !== null) {
+    content.style.flex = ''
+    content.style.minWidth = ''
+  }
+}
+
 function ToolCallGroupController() {
   const groupsRef = React.useRef(new Map())
   const expandedRef = React.useRef(new Set())
+  const inlineRowsRef = React.useRef(new Map())
   React.useEffect(() => {
     let frame = null
     const schedule = () => {
@@ -193,10 +214,11 @@ function ToolCallGroupController() {
       const previous = groupsRef.current
       const next = new Map()
       const nextRows = new Set()
+      const nextInlineRows = new Map()
       for (const flow of document.querySelectorAll('[data-chat-flow]')) {
         const children = [...flow.children].filter(child => child.dataset.dshChatEnhancementToolGroupToggle === undefined)
         let run = []
-        const flush = () => {
+        const flush = (runningRow = null) => {
           const toolCount = run.filter(row => row.dataset.chatFlowKind === 'tool-call').length
           if (run.length < 2 || toolCount === 0) return
           const key = toolGroupKey(run)
@@ -213,7 +235,12 @@ function ToolCallGroupController() {
             else expandedRef.current.add(key)
             sync()
           }
-          if (group.button.parentElement !== flow || group.button.nextElementSibling !== run[0]) flow.insertBefore(group.button, run[0])
+          if (runningRow !== null && !expanded) inlineRunningActivity(runningRow, group.button, nextInlineRows)
+          else {
+            group.button.style.flex = ''
+            group.button.style.width = '100%'
+            if (group.button.parentElement !== flow || group.button.nextElementSibling !== run[0]) flow.insertBefore(group.button, run[0])
+          }
           for (const row of run) row.hidden = !expanded
           for (const row of run) nextRows.add(row)
           next.set(key, group)
@@ -221,7 +248,7 @@ function ToolCallGroupController() {
         for (const child of children) {
           if (isGroupedActivity(child.dataset.chatFlowKind) && !isRunningActivity(child)) run.push(child)
           else {
-            flush()
+            flush(isGroupedActivity(child.dataset.chatFlowKind) && isRunningActivity(child) ? child : null)
             run = []
           }
         }
@@ -235,7 +262,11 @@ function ToolCallGroupController() {
         }
         expandedRef.current.delete(key)
       }
+      for (const [row, content] of inlineRowsRef.current) {
+        if (!nextInlineRows.has(row)) clearInlineRunningActivity(row, content)
+      }
       groupsRef.current = next
+      inlineRowsRef.current = nextInlineRows
     }
     const observer = new MutationObserver(records => {
       if (records.some(record => !(record.target instanceof Element && record.target.closest('[data-dsh-chat-enhancement-tool-group-toggle]') !== null))) schedule()
@@ -249,8 +280,10 @@ function ToolCallGroupController() {
         group.button.remove()
         for (const row of group.rows) row.hidden = false
       }
+      for (const [row, content] of inlineRowsRef.current) clearInlineRunningActivity(row, content)
       groupsRef.current.clear()
       expandedRef.current.clear()
+      inlineRowsRef.current.clear()
     }
   }, [])
   return null
