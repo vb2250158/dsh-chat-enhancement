@@ -173,6 +173,10 @@ function isGroupedActivity(kind) {
   return kind === 'tool-call' || kind === 'context'
 }
 
+function isRunningActivity(row) {
+  return row.querySelector('[data-state="running"]') !== null
+}
+
 function ToolCallGroupController() {
   const groupsRef = React.useRef(new Map())
   const expandedRef = React.useRef(new Set())
@@ -188,6 +192,7 @@ function ToolCallGroupController() {
     const sync = () => {
       const previous = groupsRef.current
       const next = new Map()
+      const nextRows = new Set()
       for (const flow of document.querySelectorAll('[data-chat-flow]')) {
         const children = [...flow.children].filter(child => child.dataset.dshChatEnhancementToolGroupToggle === undefined)
         let run = []
@@ -210,10 +215,11 @@ function ToolCallGroupController() {
           }
           if (group.button.parentElement !== flow || group.button.nextElementSibling !== run[0]) flow.insertBefore(group.button, run[0])
           for (const row of run) row.hidden = !expanded
+          for (const row of run) nextRows.add(row)
           next.set(key, group)
         }
         for (const child of children) {
-          if (isGroupedActivity(child.dataset.chatFlowKind)) run.push(child)
+          if (isGroupedActivity(child.dataset.chatFlowKind) && !isRunningActivity(child)) run.push(child)
           else {
             flush()
             run = []
@@ -224,7 +230,9 @@ function ToolCallGroupController() {
       for (const [key, group] of previous) {
         if (next.has(key)) continue
         group.button.remove()
-        for (const row of group.rows) row.hidden = false
+        for (const row of group.rows) {
+          if (!nextRows.has(row)) row.hidden = false
+        }
         expandedRef.current.delete(key)
       }
       groupsRef.current = next
@@ -232,7 +240,7 @@ function ToolCallGroupController() {
     const observer = new MutationObserver(records => {
       if (records.some(record => !(record.target instanceof Element && record.target.closest('[data-dsh-chat-enhancement-tool-group-toggle]') !== null))) schedule()
     })
-    observer.observe(document.body, { childList: true, subtree: true })
+    observer.observe(document.body, { attributes: true, attributeFilter: ['data-state'], childList: true, subtree: true })
     schedule()
     return () => {
       observer.disconnect()
