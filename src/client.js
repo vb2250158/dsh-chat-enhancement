@@ -173,23 +173,20 @@ function isGroupedActivity(kind) {
   return kind === 'tool-call' || kind === 'context'
 }
 
-function isRunningActivity(row) {
-  return row.querySelector('[data-state="running"]') !== null
-}
-
-function inlineRunningActivity(row, button, inlineRows) {
+function inlineTrailingActivity(row, button, inlineRows) {
   const content = [...row.children].find(child => child !== button) ?? null
-  Object.assign(row.style, { alignItems: 'center', display: 'flex', gap: '8px' })
+  Object.assign(row.style, { alignItems: 'center', display: 'flex', flexDirection: 'row', gap: '8px' })
   if (content !== null) Object.assign(content.style, { flex: '1 1 auto', minWidth: '0' })
   button.style.flex = '0 0 auto'
   button.style.width = 'auto'
-  row.insertBefore(button, content)
+  if (button.parentElement !== row || button.nextElementSibling !== content) row.insertBefore(button, content)
   inlineRows.set(row, content)
 }
 
-function clearInlineRunningActivity(row, content) {
+function clearInlineTrailingActivity(row, content) {
   row.style.alignItems = ''
   row.style.display = ''
+  row.style.flexDirection = ''
   row.style.gap = ''
   if (content !== null) {
     content.style.flex = ''
@@ -197,7 +194,8 @@ function clearInlineRunningActivity(row, content) {
   }
 }
 
-function ToolCallGroupController() {
+function createActivityGroupController({ toggleKey, parentNodes, isActivity, groupKey, label }) {
+  return function ActivityGroupController() {
   const groupsRef = React.useRef(new Map())
   const expandedRef = React.useRef(new Set())
   const inlineRowsRef = React.useRef(new Map())
@@ -215,40 +213,41 @@ function ToolCallGroupController() {
       const next = new Map()
       const nextRows = new Set()
       const nextInlineRows = new Map()
-      for (const flow of document.querySelectorAll('[data-chat-flow]')) {
-        const children = [...flow.children].filter(child => child.dataset.dshChatEnhancementToolGroupToggle === undefined)
+      for (const parent of parentNodes()) {
+        const children = [...parent.children].filter(child => child.dataset[toggleKey] === undefined)
         let run = []
-        const flush = (runningRow = null) => {
-          const toolCount = run.filter(row => row.dataset.chatFlowKind === 'tool-call').length
-          if (run.length < 2 || toolCount === 0) return
-          const key = toolGroupKey(run)
+        const flush = () => {
+          if (run.length < 3) return
+          const trailingRow = run.at(-1)
+          const hiddenRows = run.slice(0, -1)
+          const key = groupKey(hiddenRows)
           const expanded = expandedRef.current.has(key)
           const group = previous.get(key) ?? { button: document.createElement('button'), rows: [] }
-          group.rows = run
+          group.rows = hiddenRows
           group.button.type = 'button'
-          group.button.dataset.dshChatEnhancementToolGroupToggle = key
+          group.button.dataset[toggleKey] = key
           Object.assign(group.button.style, toolGroupButtonStyle)
           group.button.setAttribute('aria-expanded', String(expanded))
-          group.button.textContent = `${expanded ? '⌄' : '›'} 已执行 ${run.length} 项操作`
+          group.button.textContent = `${expanded ? '⌄' : '›'} ${label(hiddenRows.length)}`
           group.button.onclick = () => {
             if (expandedRef.current.has(key)) expandedRef.current.delete(key)
             else expandedRef.current.add(key)
             sync()
           }
-          if (runningRow !== null && !expanded) inlineRunningActivity(runningRow, group.button, nextInlineRows)
+          if (!expanded) inlineTrailingActivity(trailingRow, group.button, nextInlineRows)
           else {
             group.button.style.flex = ''
             group.button.style.width = '100%'
-            if (group.button.parentElement !== flow || group.button.nextElementSibling !== run[0]) flow.insertBefore(group.button, run[0])
+            if (group.button.parentElement !== parent || group.button.nextElementSibling !== hiddenRows[0]) parent.insertBefore(group.button, hiddenRows[0])
           }
-          for (const row of run) row.hidden = !expanded
-          for (const row of run) nextRows.add(row)
+          for (const row of hiddenRows) row.hidden = !expanded
+          for (const row of hiddenRows) nextRows.add(row)
           next.set(key, group)
         }
         for (const child of children) {
-          if (isGroupedActivity(child.dataset.chatFlowKind) && !isRunningActivity(child)) run.push(child)
+          if (isActivity(child)) run.push(child)
           else {
-            flush(isGroupedActivity(child.dataset.chatFlowKind) && isRunningActivity(child) ? child : null)
+            flush()
             run = []
           }
         }
@@ -263,15 +262,15 @@ function ToolCallGroupController() {
         expandedRef.current.delete(key)
       }
       for (const [row, content] of inlineRowsRef.current) {
-        if (!nextInlineRows.has(row)) clearInlineRunningActivity(row, content)
+        if (!nextInlineRows.has(row)) clearInlineTrailingActivity(row, content)
       }
       groupsRef.current = next
       inlineRowsRef.current = nextInlineRows
     }
     const observer = new MutationObserver(records => {
-      if (records.some(record => !(record.target instanceof Element && record.target.closest('[data-dsh-chat-enhancement-tool-group-toggle]') !== null))) schedule()
+      if (records.some(record => !(record.target instanceof Element && record.target.closest(`[data-${toggleKey.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`)}]`) !== null))) schedule()
     })
-    observer.observe(document.body, { attributes: true, attributeFilter: ['data-state'], childList: true, subtree: true })
+    observer.observe(document.body, { childList: true, subtree: true })
     schedule()
     return () => {
       observer.disconnect()
@@ -280,13 +279,47 @@ function ToolCallGroupController() {
         group.button.remove()
         for (const row of group.rows) row.hidden = false
       }
-      for (const [row, content] of inlineRowsRef.current) clearInlineRunningActivity(row, content)
+      for (const [row, content] of inlineRowsRef.current) clearInlineTrailingActivity(row, content)
       groupsRef.current.clear()
       expandedRef.current.clear()
       inlineRowsRef.current.clear()
     }
   }, [])
   return null
+  }
+}
+
+const ToolCallActivityGroupController = createActivityGroupController({
+  toggleKey: 'dshChatEnhancementToolGroupToggle',
+  parentNodes: () => document.querySelectorAll('[data-chat-flow]'),
+  isActivity: row => isGroupedActivity(row.dataset.chatFlowKind),
+  groupKey: toolGroupKey,
+  label: count => `已执行 ${count} 项操作`,
+})
+
+let nextReasoningKey = 0
+
+function reasoningGroupKey(rows) {
+  return rows.map((row) => {
+    if (row.dataset.dshChatEnhancementReasoningKey === undefined) row.dataset.dshChatEnhancementReasoningKey = `reasoning-${nextReasoningKey++}`
+    return row.dataset.dshChatEnhancementReasoningKey
+  }).join('|')
+}
+
+const ThinkingActivityGroupController = createActivityGroupController({
+  toggleKey: 'dshChatEnhancementThinkingGroupToggle',
+  parentNodes: () => new Set([...document.querySelectorAll('[data-variant="think"]')].map(row => row.parentElement).filter(parent => parent !== null)),
+  isActivity: row => row.dataset.variant === 'think',
+  groupKey: reasoningGroupKey,
+  label: count => `已完成 ${count} 项思考`,
+})
+
+function ToolCallGroupController() {
+  return React.createElement(ToolCallActivityGroupController)
+}
+
+function ThinkingGroupController() {
+  return React.createElement(ThinkingActivityGroupController)
 }
 
 const requestSchema = { parse(value) {
@@ -343,6 +376,9 @@ export async function apply(ctx) {
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'chat-enhancement-tool-groups', order: 101,
   }, ToolCallGroupController))
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock', id: 'chat-enhancement-thinking-groups', order: 102,
+  }, ThinkingGroupController))
   for (const key of ['read_image', 'show_image', 'show_video']) {
     ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, locale: 'conversation' }, (props) => React.createElement(MediaToolView, { ...props, sessions, readVideo })))
   }
