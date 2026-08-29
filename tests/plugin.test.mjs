@@ -19,6 +19,8 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /conversation\.input\.dock/)
   assert.match(client, /ToolCallGroupController/)
   assert.match(client, /chatFlowKind/)
+  assert.match(client, /isGroupedActivity/)
+  assert.match(client, /kind === 'context'/)
   assert.match(client, /MutationObserver/)
   assert.doesNotMatch(client, /key: 'tool-call', priority: -1/)
   assert.match(client, /readAttachment/)
@@ -100,7 +102,7 @@ test('show_image stores an attachment and returns only its reference', async () 
   assert.match(videoTool.output.render({}, video)[0].text, /dsh-chat-enhancement\/video/)
 })
 
-test('client groups original tool rows without replacing the tool-call node', async () => {
+test('client groups original tool and context rows without replacing the tool-call node', async () => {
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
   let loaderEntry
   vm.runInNewContext(client, {

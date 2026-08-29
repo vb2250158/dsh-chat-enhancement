@@ -169,6 +169,10 @@ function toolGroupKey(rows) {
   return rows.map(row => row.dataset.chatFlowKey).join('|')
 }
 
+function isGroupedActivity(kind) {
+  return kind === 'tool-call' || kind === 'context'
+}
+
 function ToolCallGroupController() {
   const groupsRef = React.useRef(new Map())
   const expandedRef = React.useRef(new Set())
@@ -188,7 +192,8 @@ function ToolCallGroupController() {
         const children = [...flow.children].filter(child => child.dataset.dshChatEnhancementToolGroupToggle === undefined)
         let run = []
         const flush = () => {
-          if (run.length < 2) return
+          const toolCount = run.filter(row => row.dataset.chatFlowKind === 'tool-call').length
+          if (run.length < 2 || toolCount === 0) return
           const key = toolGroupKey(run)
           const expanded = expandedRef.current.has(key)
           const group = previous.get(key) ?? { button: document.createElement('button'), rows: [] }
@@ -197,7 +202,7 @@ function ToolCallGroupController() {
           group.button.dataset.dshChatEnhancementToolGroupToggle = key
           Object.assign(group.button.style, toolGroupButtonStyle)
           group.button.setAttribute('aria-expanded', String(expanded))
-          group.button.textContent = `${expanded ? '⌄' : '›'} 工具调用 · ${run.length} 项`
+          group.button.textContent = `${expanded ? '⌄' : '›'} 执行过程 · ${run.length} 项`
           group.button.onclick = () => {
             if (expandedRef.current.has(key)) expandedRef.current.delete(key)
             else expandedRef.current.add(key)
@@ -208,7 +213,7 @@ function ToolCallGroupController() {
           next.set(key, group)
         }
         for (const child of children) {
-          if (child.dataset.chatFlowKind === 'tool-call') run.push(child)
+          if (isGroupedActivity(child.dataset.chatFlowKind)) run.push(child)
           else {
             flush()
             run = []
