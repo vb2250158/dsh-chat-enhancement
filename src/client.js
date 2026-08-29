@@ -316,8 +316,8 @@ function reasoningGroupKey(rows) {
 
 const ThinkingActivityGroupController = createActivityGroupController({
   toggleKey: 'dshChatEnhancementThinkingGroupToggle',
-  parentNodes: () => [document.body],
-  rowsForParent: () => [...document.querySelectorAll('[data-variant="think"]')],
+  parentNodes: () => document.querySelectorAll('[data-chat-flow-key]'),
+  rowsForParent: parent => [...parent.querySelectorAll('[data-variant="think"]')],
   isActivity: row => row.dataset.variant === 'think',
   groupKey: reasoningGroupKey,
   label: count => `已完成 ${count} 项思考`,

@@ -27,7 +27,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /data-chat-flow-key/)
   assert.match(client, /think:\$\{index\}/)
   assert.match(client, /已完成 \$\{count\} 项思考/)
-  assert.match(client, /rowsForParent: \(\) => \[\.\.\.document\.querySelectorAll\('\[data-variant="think"\]'\)\]/)
+  assert.match(client, /parentNodes: \(\) => document\.querySelectorAll\('\[data-chat-flow-key\]'\)/)
   assert.match(client, /inlineTrailingActivity/)
   assert.match(client, /isDisplayToolRow/)
   assert.match(client, /data-dsh-chat-enhancement/)
