@@ -27,6 +27,8 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /dshChatEnhancementReasoningKey/)
   assert.match(client, /已完成 \$\{count\} 项思考/)
   assert.match(client, /inlineTrailingActivity/)
+  assert.match(client, /isDisplayToolRow/)
+  assert.match(client, /data-dsh-chat-enhancement/)
   assert.match(client, /row\.insertBefore\(button, content\)/)
   assert.match(client, /MutationObserver/)
   assert.doesNotMatch(client, /key: 'tool-call', priority: -1/)

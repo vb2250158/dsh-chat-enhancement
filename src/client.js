@@ -173,6 +173,10 @@ function isGroupedActivity(kind) {
   return kind === 'tool-call' || kind === 'context'
 }
 
+function isDisplayToolRow(row) {
+  return row.querySelector('[data-dsh-chat-enhancement]') !== null
+}
+
 function inlineTrailingActivity(row, button, inlineRows) {
   const content = [...row.children].find(child => child !== button) ?? null
   Object.assign(row.style, { alignItems: 'center', display: 'flex', flexDirection: 'row', gap: '8px' })
@@ -292,7 +296,7 @@ function createActivityGroupController({ toggleKey, parentNodes, isActivity, gro
 const ToolCallActivityGroupController = createActivityGroupController({
   toggleKey: 'dshChatEnhancementToolGroupToggle',
   parentNodes: () => document.querySelectorAll('[data-chat-flow]'),
-  isActivity: row => isGroupedActivity(row.dataset.chatFlowKind),
+  isActivity: row => isGroupedActivity(row.dataset.chatFlowKind) && !isDisplayToolRow(row),
   groupKey: toolGroupKey,
   label: count => `已执行 ${count} 项操作`,
 })
