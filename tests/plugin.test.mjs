@@ -26,6 +26,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /ThinkingGroupController/)
   assert.match(client, /dshChatEnhancementReasoningKey/)
   assert.match(client, /已完成 \$\{count\} 项思考/)
+  assert.match(client, /rowsForParent: \(\) => \[\.\.\.document\.querySelectorAll\('\[data-variant="think"\]'\)\]/)
   assert.match(client, /inlineTrailingActivity/)
   assert.match(client, /isDisplayToolRow/)
   assert.match(client, /data-dsh-chat-enhancement/)

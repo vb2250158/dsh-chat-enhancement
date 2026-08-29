@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.3.15",
+  "version": "0.3.16",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
   "main": "lib/index.js",

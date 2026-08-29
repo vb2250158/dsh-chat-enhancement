@@ -198,7 +198,7 @@ function clearInlineTrailingActivity(row, content) {
   }
 }
 
-function createActivityGroupController({ toggleKey, parentNodes, isActivity, groupKey, label }) {
+function createActivityGroupController({ toggleKey, parentNodes, rowsForParent, isActivity, groupKey, label }) {
   return function ActivityGroupController() {
   const groupsRef = React.useRef(new Map())
   const expandedRef = React.useRef(new Set())
@@ -218,7 +218,7 @@ function createActivityGroupController({ toggleKey, parentNodes, isActivity, gro
       const nextRows = new Set()
       const nextInlineRows = new Map()
       for (const parent of parentNodes()) {
-        const children = [...parent.children].filter(child => child.dataset[toggleKey] === undefined)
+        const children = rowsForParent(parent).filter(child => child.dataset[toggleKey] === undefined)
         let run = []
         const flush = () => {
           if (run.length < 3) return
@@ -242,7 +242,8 @@ function createActivityGroupController({ toggleKey, parentNodes, isActivity, gro
           else {
             group.button.style.flex = ''
             group.button.style.width = '100%'
-            if (group.button.parentElement !== parent || group.button.nextElementSibling !== hiddenRows[0]) parent.insertBefore(group.button, hiddenRows[0])
+            const buttonParent = hiddenRows[0]?.parentElement ?? parent
+            if (group.button.parentElement !== buttonParent || group.button.nextElementSibling !== hiddenRows[0]) buttonParent.insertBefore(group.button, hiddenRows[0])
           }
           for (const row of hiddenRows) row.hidden = !expanded
           for (const row of hiddenRows) nextRows.add(row)
@@ -296,6 +297,7 @@ function createActivityGroupController({ toggleKey, parentNodes, isActivity, gro
 const ToolCallActivityGroupController = createActivityGroupController({
   toggleKey: 'dshChatEnhancementToolGroupToggle',
   parentNodes: () => document.querySelectorAll('[data-chat-flow]'),
+  rowsForParent: parent => [...parent.children],
   isActivity: row => isGroupedActivity(row.dataset.chatFlowKind) && !isDisplayToolRow(row),
   groupKey: toolGroupKey,
   label: count => `已执行 ${count} 项操作`,
@@ -312,7 +314,8 @@ function reasoningGroupKey(rows) {
 
 const ThinkingActivityGroupController = createActivityGroupController({
   toggleKey: 'dshChatEnhancementThinkingGroupToggle',
-  parentNodes: () => new Set([...document.querySelectorAll('[data-variant="think"]')].map(row => row.parentElement).filter(parent => parent !== null)),
+  parentNodes: () => [document.body],
+  rowsForParent: () => [...document.querySelectorAll('[data-variant="think"]')],
   isActivity: row => row.dataset.variant === 'think',
   groupKey: reasoningGroupKey,
   label: count => `已完成 ${count} 项思考`,
