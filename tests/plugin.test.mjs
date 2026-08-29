@@ -17,10 +17,10 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /read_image.*show_image.*show_video/s)
   assert.match(client, /MarkdownText/)
   assert.match(client, /conversation\.input\.dock/)
-  assert.match(client, /key: 'tool-call', priority: -1/)
-  assert.match(client, /CollapsibleToolCallTree/)
-  assert.match(client, /aria-expanded/)
-  assert.doesNotMatch(client, /children: \{ 'tool\.call\.toolview'/)
+  assert.match(client, /ToolCallGroupController/)
+  assert.match(client, /chatFlowKind/)
+  assert.match(client, /MutationObserver/)
+  assert.doesNotMatch(client, /key: 'tool-call', priority: -1/)
   assert.match(client, /readAttachment/)
   assert.doesNotMatch(client, /file:\/\//)
   assert.match(host, /name: 'show_image'/)
@@ -100,7 +100,7 @@ test('show_image stores an attachment and returns only its reference', async () 
   assert.match(videoTool.output.render({}, video)[0].text, /dsh-chat-enhancement\/video/)
 })
 
-test('client shadows the tool-call node without redeclaring its child slot', async () => {
+test('client groups original tool rows without replacing the tool-call node', async () => {
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
   let loaderEntry
   vm.runInNewContext(client, {
@@ -127,10 +127,8 @@ test('client shadows the tool-call node without redeclaring its child slot', asy
   }
 
   await plugin.apply(context)
-  const toolNode = registrations.find(({ options }) => options.name === 'conversation.chat.node')
-  assert.equal(toolNode.options.key, 'tool-call')
-  assert.equal(toolNode.options.priority, -1)
-  assert.equal(toolNode.options.children, undefined)
-  assert.equal(typeof toolNode.options.inject, 'function')
-  assert.equal(toolNode.component.name, 'CollapsibleToolCallTree')
+  assert.equal(registrations.some(({ options }) => options.name === 'conversation.chat.node'), false)
+  const groupController = registrations.find(({ options }) => options.id === 'chat-enhancement-tool-groups')
+  assert.equal(groupController.options.name, 'conversation.input.dock')
+  assert.equal(groupController.component.name, 'ToolCallGroupController')
 })

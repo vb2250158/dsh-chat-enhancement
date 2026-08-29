@@ -9,11 +9,7 @@ const mutedStyle = { color: 'var(--dsw-alias-label-tertiary)', fontSize: '13px' 
 const markdownDialogStyle = { width: 'min(960px, 100%)', maxHeight: 'min(85vh, 900px)', overflow: 'auto', padding: '20px', borderRadius: '12px', background: 'var(--dsw-alias-bg-elevated)', color: 'var(--dsw-alias-label-primary)', boxShadow: '0 20px 48px rgb(0 0 0 / 35%)' }
 const markdownHeaderStyle = { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }
 const closeButtonStyle = { marginLeft: 'auto', border: 0, borderRadius: '6px', padding: '6px 9px', background: 'transparent', color: 'inherit', cursor: 'pointer' }
-const toolGroupStyle = { margin: '6px 0', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '8px', overflow: 'hidden' }
-const toolGroupButtonStyle = { display: 'flex', width: '100%', alignItems: 'center', gap: '8px', border: 0, padding: '8px 10px', background: 'transparent', color: 'inherit', cursor: 'pointer', textAlign: 'left' }
-const toolGroupBodyStyle = { padding: '0 10px 8px' }
-const genericToolStyle = { display: 'grid', gap: '8px', padding: '8px 0' }
-const toolPayloadStyle = { margin: 0, overflow: 'auto', maxHeight: '240px', padding: '8px', borderRadius: '6px', background: 'var(--dsw-alias-bg-secondary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }
+const toolGroupButtonStyle = { display: 'flex', width: '100%', alignItems: 'center', gap: '8px', border: 0, padding: '8px 10px', borderRadius: '8px', background: 'transparent', color: 'inherit', cursor: 'pointer', textAlign: 'left' }
 
 function pathFromArgs(argsRaw) {
   try {
@@ -169,73 +165,82 @@ function MediaToolView({ block, sessionId, sessions, readVideo }) {
   )
 }
 
-function toolNameFromBlock(block) {
-  return 'kind' in block ? block.call?.name ?? '工具调用' : block.name ?? '工具调用'
+function toolGroupKey(rows) {
+  return rows.map(row => row.dataset.chatFlowKey).join('|')
 }
 
-function toolArgsFromBlock(block) {
-  return block.argsRaw ?? block.call?.argsRaw ?? ''
-}
-
-function toolOutputFromBlock(block) {
-  if (!('kind' in block)) return ''
-  return block.content
-    .filter(part => part.type === 'text')
-    .map(part => part.text)
-    .join('\n')
-}
-
-function GenericToolView({ toolName, block }) {
-  const args = toolArgsFromBlock(block)
-  const output = toolOutputFromBlock(block)
-  return React.createElement('section', { style: genericToolStyle },
-    React.createElement('strong', null, toolName),
-    args !== '' && React.createElement('pre', { style: toolPayloadStyle }, args),
-    output !== '' && React.createElement('pre', { style: toolPayloadStyle }, output),
-  )
-}
-
-function isMediaToolName(toolName) {
-  return ['read_image', 'show_image', 'show_video'].includes(toolName)
-}
-
-function CollapsibleToolCall({ block, sessionId, sessions, readVideo }) {
-  const [expanded, setExpanded] = React.useState(false)
-  const toolName = toolNameFromBlock(block)
-  const subCalls = block.subCalls ?? []
-  const state = 'kind' in block ? (block.isError ? '失败' : '完成') : '运行中'
-  return React.createElement('section', { 'data-dsh-chat-enhancement': 'tool-group', style: toolGroupStyle },
-    React.createElement('button', {
-      type: 'button',
-      style: toolGroupButtonStyle,
-      onClick: () => setExpanded(value => !value),
-      'aria-expanded': expanded,
-    },
-    React.createElement('span', { 'aria-hidden': true }, expanded ? '⌄' : '›'),
-    React.createElement('span', null, `工具调用 · ${toolName}`),
-    React.createElement('span', { style: { ...mutedStyle, marginLeft: 'auto' } }, state)),
-    expanded && React.createElement('div', { style: toolGroupBodyStyle },
-      isMediaToolName(toolName)
-        ? React.createElement(MediaToolView, { block, sessionId, sessions, readVideo })
-        : React.createElement(GenericToolView, { toolName, block }),
-      subCalls.map(child => React.createElement(CollapsibleToolCall, {
-        key: child.callId,
-        block: child,
-        sessionId,
-        sessions,
-        readVideo,
-      })),
-    ),
-  )
-}
-
-function CollapsibleToolCallTree({ node, sessionId, sessions, readVideo }) {
-  return React.createElement(CollapsibleToolCall, {
-    block: node.data.root,
-    sessionId,
-    sessions,
-    readVideo,
-  })
+function ToolCallGroupController() {
+  const groupsRef = React.useRef(new Map())
+  const expandedRef = React.useRef(new Set())
+  React.useEffect(() => {
+    let frame = null
+    const schedule = () => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(() => {
+        frame = null
+        sync()
+      })
+    }
+    const sync = () => {
+      const previous = groupsRef.current
+      const next = new Map()
+      for (const flow of document.querySelectorAll('[data-chat-flow]')) {
+        const children = [...flow.children].filter(child => child.dataset.dshChatEnhancementToolGroupToggle === undefined)
+        let run = []
+        const flush = () => {
+          if (run.length < 2) return
+          const key = toolGroupKey(run)
+          const expanded = expandedRef.current.has(key)
+          const group = previous.get(key) ?? { button: document.createElement('button'), rows: [] }
+          group.rows = run
+          group.button.type = 'button'
+          group.button.dataset.dshChatEnhancementToolGroupToggle = key
+          Object.assign(group.button.style, toolGroupButtonStyle)
+          group.button.setAttribute('aria-expanded', String(expanded))
+          group.button.textContent = `${expanded ? '⌄' : '›'} 工具调用 · ${run.length} 项`
+          group.button.onclick = () => {
+            if (expandedRef.current.has(key)) expandedRef.current.delete(key)
+            else expandedRef.current.add(key)
+            sync()
+          }
+          if (group.button.parentElement !== flow || group.button.nextElementSibling !== run[0]) flow.insertBefore(group.button, run[0])
+          for (const row of run) row.hidden = !expanded
+          next.set(key, group)
+        }
+        for (const child of children) {
+          if (child.dataset.chatFlowKind === 'tool-call') run.push(child)
+          else {
+            flush()
+            run = []
+          }
+        }
+        flush()
+      }
+      for (const [key, group] of previous) {
+        if (next.has(key)) continue
+        group.button.remove()
+        for (const row of group.rows) row.hidden = false
+        expandedRef.current.delete(key)
+      }
+      groupsRef.current = next
+    }
+    const observer = new MutationObserver(records => {
+      if (records.some(record => !(record.target instanceof Element && record.target.closest('[data-dsh-chat-enhancement-tool-group-toggle]') !== null))) schedule()
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    schedule()
+    return () => {
+      observer.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
+      for (const group of groupsRef.current.values()) {
+        group.button.remove()
+        for (const row of group.rows) row.hidden = false
+      }
+      groupsRef.current.clear()
+      expandedRef.current.clear()
+    }
+  }, [])
+  return null
 }
 
 const requestSchema = { parse(value) {
@@ -285,16 +290,15 @@ export async function apply(ctx) {
     if (!result.ok || result.value === undefined) throw new Error(result.error?.message ?? 'Markdown 读取失败。')
     return result.value
   }
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'tool-call',
-    priority: -1,
-    locale: 'conversation',
-    inject: () => ({ sessions, readVideo }),
-  }, CollapsibleToolCallTree))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'chat-enhancement-markdown-preview', order: 100,
     inject: () => ({ readMarkdown }),
   }, MarkdownPreviewController))
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock', id: 'chat-enhancement-tool-groups', order: 101,
+  }, ToolCallGroupController))
+  for (const key of ['read_image', 'show_image', 'show_video']) {
+    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, locale: 'conversation' }, (props) => React.createElement(MediaToolView, { ...props, sessions, readVideo })))
+  }
   return dispose
 }
