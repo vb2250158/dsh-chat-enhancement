@@ -9,6 +9,11 @@ const mutedStyle = { color: 'var(--dsw-alias-label-tertiary)', fontSize: '13px' 
 const markdownDialogStyle = { width: 'min(960px, 100%)', maxHeight: 'min(85vh, 900px)', overflow: 'auto', padding: '20px', borderRadius: '12px', background: 'var(--dsw-alias-bg-elevated)', color: 'var(--dsw-alias-label-primary)', boxShadow: '0 20px 48px rgb(0 0 0 / 35%)' }
 const markdownHeaderStyle = { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }
 const closeButtonStyle = { marginLeft: 'auto', border: 0, borderRadius: '6px', padding: '6px 9px', background: 'transparent', color: 'inherit', cursor: 'pointer' }
+const toolGroupStyle = { margin: '6px 0', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '8px', overflow: 'hidden' }
+const toolGroupButtonStyle = { display: 'flex', width: '100%', alignItems: 'center', gap: '8px', border: 0, padding: '8px 10px', background: 'transparent', color: 'inherit', cursor: 'pointer', textAlign: 'left' }
+const toolGroupBodyStyle = { padding: '0 10px 8px' }
+const genericToolStyle = { display: 'grid', gap: '8px', padding: '8px 0' }
+const toolPayloadStyle = { margin: 0, overflow: 'auto', maxHeight: '240px', padding: '8px', borderRadius: '6px', background: 'var(--dsw-alias-bg-secondary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }
 
 function pathFromArgs(argsRaw) {
   try {
@@ -164,6 +169,84 @@ function MediaToolView({ block, sessionId, sessions, readVideo }) {
   )
 }
 
+function toolNameFromBlock(block) {
+  return 'kind' in block ? block.call?.name ?? '工具调用' : block.name ?? '工具调用'
+}
+
+function toolArgsFromBlock(block) {
+  return block.argsRaw ?? block.call?.argsRaw ?? ''
+}
+
+function toolOutputFromBlock(block) {
+  if (!('kind' in block)) return ''
+  return block.content
+    .filter(part => part.type === 'text')
+    .map(part => part.text)
+    .join('\n')
+}
+
+function GenericToolView({ toolName, block }) {
+  const args = toolArgsFromBlock(block)
+  const output = toolOutputFromBlock(block)
+  return React.createElement('section', { style: genericToolStyle },
+    React.createElement('strong', null, toolName),
+    args !== '' && React.createElement('pre', { style: toolPayloadStyle }, args),
+    output !== '' && React.createElement('pre', { style: toolPayloadStyle }, output),
+  )
+}
+
+function CollapsibleToolCall({ renderSlot, block, selectedCallId, cwd, openFile, inspectCall }) {
+  const [expanded, setExpanded] = React.useState(false)
+  const toolName = toolNameFromBlock(block)
+  const owner = {
+    callId: block.callId,
+    toolName,
+    block,
+    cwd,
+    openFile,
+    inspect: () => { inspectCall(block.callId) },
+  }
+  const subCalls = block.subCalls ?? []
+  const state = 'kind' in block ? (block.isError ? '失败' : '完成') : '运行中'
+  return React.createElement('section', { 'data-dsh-chat-enhancement': 'tool-group', style: toolGroupStyle },
+    React.createElement('button', {
+      type: 'button',
+      style: toolGroupButtonStyle,
+      onClick: () => setExpanded(value => !value),
+      'aria-expanded': expanded,
+    },
+    React.createElement('span', { 'aria-hidden': true }, expanded ? '⌄' : '›'),
+    React.createElement('span', null, `工具调用 · ${toolName}`),
+    React.createElement('span', { style: { ...mutedStyle, marginLeft: 'auto' } }, state)),
+    expanded && React.createElement('div', { style: toolGroupBodyStyle },
+      renderSlot('tool.call.toolview', owner, {
+        entryKey: toolName,
+        fallback: React.createElement(GenericToolView, { toolName, block }),
+      }),
+      subCalls.map(child => React.createElement(CollapsibleToolCall, {
+        key: child.callId,
+        renderSlot,
+        block: child,
+        selectedCallId,
+        cwd,
+        openFile,
+        inspectCall,
+      })),
+    ),
+  )
+}
+
+function CollapsibleToolCallTree({ renderSlot, node, selectedCallId, cwd, openFile, inspectCall }) {
+  return React.createElement(CollapsibleToolCall, {
+    renderSlot,
+    block: node.data.root,
+    selectedCallId,
+    cwd,
+    openFile,
+    inspectCall,
+  })
+}
+
 const requestSchema = { parse(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value) || typeof value.sessionId !== 'string' || typeof value.token !== 'string') throw new TypeError('media request is invalid.')
   return { sessionId: value.sessionId, token: value.token }
@@ -211,6 +294,13 @@ export async function apply(ctx) {
     if (!result.ok || result.value === undefined) throw new Error(result.error?.message ?? 'Markdown 读取失败。')
     return result.value
   }
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+    name: 'conversation.chat.node',
+    key: 'tool-call',
+    priority: -1,
+    locale: 'conversation',
+    children: { 'tool.call.toolview': { kind: 'keyed', scope: 'session' } },
+  }, CollapsibleToolCallTree))
   for (const key of ['read_image', 'show_image', 'show_video']) {
     ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, locale: 'conversation' }, (props) => React.createElement(MediaToolView, { ...props, sessions, readVideo })))
   }
