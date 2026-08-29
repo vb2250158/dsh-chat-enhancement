@@ -21,6 +21,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /chatFlowKind/)
   assert.match(client, /isGroupedActivity/)
   assert.match(client, /kind === 'context'/)
+  assert.match(client, /已执行 \$\{run\.length\} 项操作/)
   assert.match(client, /MutationObserver/)
   assert.doesNotMatch(client, /key: 'tool-call', priority: -1/)
   assert.match(client, /readAttachment/)

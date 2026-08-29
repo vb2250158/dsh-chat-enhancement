@@ -9,7 +9,7 @@ const mutedStyle = { color: 'var(--dsw-alias-label-tertiary)', fontSize: '13px' 
 const markdownDialogStyle = { width: 'min(960px, 100%)', maxHeight: 'min(85vh, 900px)', overflow: 'auto', padding: '20px', borderRadius: '12px', background: 'var(--dsw-alias-bg-elevated)', color: 'var(--dsw-alias-label-primary)', boxShadow: '0 20px 48px rgb(0 0 0 / 35%)' }
 const markdownHeaderStyle = { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }
 const closeButtonStyle = { marginLeft: 'auto', border: 0, borderRadius: '6px', padding: '6px 9px', background: 'transparent', color: 'inherit', cursor: 'pointer' }
-const toolGroupButtonStyle = { display: 'flex', width: '100%', alignItems: 'center', gap: '8px', border: 0, padding: '8px 10px', borderRadius: '8px', background: 'transparent', color: 'inherit', cursor: 'pointer', textAlign: 'left' }
+const toolGroupButtonStyle = { display: 'flex', width: '100%', alignItems: 'center', gap: '8px', border: 0, padding: '6px 0', background: 'transparent', color: 'inherit', cursor: 'pointer', textAlign: 'left' }
 
 function pathFromArgs(argsRaw) {
   try {
@@ -202,7 +202,7 @@ function ToolCallGroupController() {
           group.button.dataset.dshChatEnhancementToolGroupToggle = key
           Object.assign(group.button.style, toolGroupButtonStyle)
           group.button.setAttribute('aria-expanded', String(expanded))
-          group.button.textContent = `${expanded ? '⌄' : '›'} 执行过程 · ${run.length} 项`
+          group.button.textContent = `${expanded ? '⌄' : '›'} 已执行 ${run.length} 项操作`
           group.button.onclick = () => {
             if (expandedRef.current.has(key)) expandedRef.current.delete(key)
             else expandedRef.current.add(key)
