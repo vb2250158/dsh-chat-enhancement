@@ -233,7 +233,9 @@ function createActivityGroupController({ toggleKey, parentNodes, rowsForParent, 
           Object.assign(group.button.style, toolGroupButtonStyle)
           group.button.setAttribute('aria-expanded', String(expanded))
           group.button.textContent = `${expanded ? '⌄' : '›'} ${label(hiddenRows.length)}`
-          group.button.onclick = () => {
+          group.button.onclick = (event) => {
+            event.preventDefault()
+            event.stopPropagation()
             if (expandedRef.current.has(key)) expandedRef.current.delete(key)
             else expandedRef.current.add(key)
             sync()
@@ -303,12 +305,12 @@ const ToolCallActivityGroupController = createActivityGroupController({
   label: count => `已执行 ${count} 项操作`,
 })
 
-let nextReasoningKey = 0
-
 function reasoningGroupKey(rows) {
   return rows.map((row) => {
-    if (row.dataset.dshChatEnhancementReasoningKey === undefined) row.dataset.dshChatEnhancementReasoningKey = `reasoning-${nextReasoningKey++}`
-    return row.dataset.dshChatEnhancementReasoningKey
+    const flow = row.closest('[data-chat-flow-key]')
+    if (flow === null) return row.textContent ?? ''
+    const index = [...flow.querySelectorAll('[data-variant="think"]')].indexOf(row)
+    return `${flow.dataset.chatFlowKey ?? ''}:think:${index}`
   }).join('|')
 }
 
