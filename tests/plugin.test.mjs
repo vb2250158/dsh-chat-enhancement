@@ -52,7 +52,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(typertHost, /typeSymbol: requestSymbol/)
 })
 
-test('show_image stores an attachment and returns only its reference', async () => {
+test('show_image writes its managed attachment into the session tool result', async () => {
   const { apply } = await import(new URL('./lib/index.js', root))
   const tools = new Map()
   const context = {
@@ -92,11 +92,15 @@ test('show_image stores an attachment and returns only its reference', async () 
     properties: { file_path: { type: 'string', description: 'Image path, resolved relative to the current session workspace.' } },
   })
   const value = await imageTool.execute({ file_path: 'image.png' }, { agent: { id: 'session-a', session: { header: { cwd: 'C:/workspace' } } }, signal: new AbortController().signal })
-  const [content] = imageTool.output.render({}, value)
-  assert.equal(content.type, 'text')
-  assert.deepEqual(JSON.parse(content.text), {
+  const [marker, image] = imageTool.output.render({}, value)
+  assert.equal(marker.type, 'text')
+  assert.deepEqual(JSON.parse(marker.text), {
     type: 'dsh-chat-enhancement/image',
     path: 'C:/workspace/image.png',
+    attachment: { attachmentId: 'sha256:test', mediaType: 'image/png', bytes: 3, width: 1, height: 1, name: 'image.png' },
+  })
+  assert.deepEqual(image, {
+    type: 'image',
     attachment: { attachmentId: 'sha256:test', mediaType: 'image/png', bytes: 3, width: 1, height: 1, name: 'image.png' },
   })
 

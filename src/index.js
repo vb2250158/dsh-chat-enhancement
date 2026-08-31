@@ -182,7 +182,13 @@ function applyShowImageTool(ctx) {
     name: 'show_image',
     description: 'Display a PNG, JPEG, WebP, or GIF image to the user in the chat. Use this when the user asks to see an existing image or when an image result should be presented visually. This tool does not modify the image.',
     parameters: filePathParameters('Image path, resolved relative to the current session workspace.'),
-    output: { schema: imageOutputSchema(), render: (_args, value) => [{ type: 'text', text: imagePreviewMarker(value) }] },
+    output: {
+      schema: imageOutputSchema(),
+      render: (_args, value) => [
+        { type: 'text', text: imagePreviewMarker(value) },
+        { type: 'image', attachment: value.image },
+      ],
+    },
     async execute(args, exec) {
       const mediaType = imageMediaTypeFor(args.file_path)
       if (mediaType === undefined) throw new Error('show_image accepts PNG, JPEG, WebP, or GIF files only.')

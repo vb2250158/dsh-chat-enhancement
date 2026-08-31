@@ -21,19 +21,21 @@ function pathFromArgs(argsRaw) {
 function previewFromBlock(block) {
   if (!('kind' in block)) return null
   const image = block.content.find(part => part.type === 'image')?.attachment
-  if (image !== undefined) return { kind: 'image', attachment: image, path: null }
+  let imagePath = null
   for (const part of block.content) {
     if (part.type !== 'text') continue
     try {
       const marker = JSON.parse(part.text)
       if (marker?.type === 'dsh-chat-enhancement/image' && marker.attachment !== null && typeof marker.attachment === 'object') {
-        return { kind: 'image', attachment: marker.attachment, path: typeof marker.path === 'string' ? marker.path : null }
+        imagePath = typeof marker.path === 'string' ? marker.path : null
+        if (image === undefined) return { kind: 'image', attachment: marker.attachment, path: imagePath }
       }
       if (marker?.type === 'dsh-chat-enhancement/video' && typeof marker.token === 'string' && typeof marker.mediaType === 'string' && typeof marker.name === 'string') {
         return { kind: 'video', token: marker.token, mediaType: marker.mediaType, name: marker.name, bytes: typeof marker.bytes === 'number' ? marker.bytes : 0 }
       }
     } catch {}
   }
+  if (image !== undefined) return { kind: 'image', attachment: image, path: imagePath }
   return null
 }
 
