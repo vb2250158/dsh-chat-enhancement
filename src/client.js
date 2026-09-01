@@ -15,7 +15,9 @@ const imageDialogToolbarStyle = { position: 'absolute', top: 'max(12px, env(safe
 const imageDialogModeStyle = { position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', left: 'max(12px, env(safe-area-inset-left))', zIndex: 2 }
 const imageDialogActionStyle = { display: 'inline-flex', alignItems: 'center', minHeight: '36px', border: '1px solid rgb(255 255 255 / 24%)', borderRadius: '8px', padding: '6px 12px', background: 'rgb(20 20 20 / 72%)', color: '#fff', cursor: 'pointer', font: 'inherit', textDecoration: 'none' }
 const imageDialogNavStyle = { position: 'absolute', top: '50%', zIndex: 2, width: '42px', height: '42px', transform: 'translateY(-50%)', border: '1px solid rgb(255 255 255 / 20%)', borderRadius: '999px', background: 'rgb(20 20 20 / 62%)', color: '#fff', cursor: 'pointer', fontSize: '24px' }
-const imageFloatingStyle = { position: 'fixed', top: 'max(16px, env(safe-area-inset-top))', right: 'max(16px, env(safe-area-inset-right))', zIndex: 1000, display: 'grid', placeItems: 'center', width: 'min(720px, calc(100vw - 32px))', height: 'min(62vh, 640px)', overflow: 'hidden', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '12px', background: 'rgb(8 20 36 / 96%)', boxShadow: '0 20px 48px rgb(0 0 0 / 45%)', touchAction: 'pan-y' }
+const imageFloatingStyle = { position: 'fixed', top: 'max(16px, env(safe-area-inset-top))', right: 'max(16px, env(safe-area-inset-right))', zIndex: 1000, display: 'grid', placeItems: 'center', width: 'min(720px, calc(100vw - 32px))', overflow: 'hidden', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '12px', background: 'rgb(8 20 36 / 96%)', boxShadow: '0 20px 48px rgb(0 0 0 / 45%)', touchAction: 'pan-y' }
+const imageResizeHandleStyle = { position: 'absolute', right: 0, bottom: 0, left: 0, zIndex: 3, display: 'grid', placeItems: 'center', height: '18px', border: 0, padding: 0, background: 'rgb(8 20 36 / 72%)', cursor: 'ns-resize', touchAction: 'none' }
+const imageResizeLineStyle = { width: '72px', height: '3px', borderRadius: '999px', background: 'rgb(255 255 255 / 52%)' }
 const settingsSectionStyle = { display: 'grid', gap: '18px', minWidth: 0 }
 const settingsRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '20px', padding: '14px 0', borderBottom: '1px solid var(--dsw-alias-line-primary)' }
 
@@ -121,7 +123,9 @@ function imageGallery(sessionId) {
 function ImagePreviewDialog({ sessionId, initial, onClose }) {
   const [current, setCurrent] = React.useState(initial)
   const [floating, setFloating] = React.useState(false)
+  const [floatingHeightRatio, setFloatingHeightRatio] = React.useState(0.38)
   const pointerStart = React.useRef(null)
+  const resizePointer = React.useRef(null)
   const currentRef = React.useRef(current)
   const followingLatest = React.useRef(false)
   currentRef.current = current
@@ -138,6 +142,12 @@ function ImagePreviewDialog({ sessionId, initial, onClose }) {
   const index = images.findIndex(image => image.url === current.url)
   const hasPrevious = index > 0
   const hasNext = index >= 0 && index < images.length - 1
+  const resizeFloating = (event) => {
+    if (resizePointer.current !== event.pointerId) return
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+    const nextRatio = Math.min(0.78, Math.max(0.2, (event.clientY - 16) / viewportHeight))
+    setFloatingHeightRatio(nextRatio)
+  }
   React.useEffect(() => {
     const initialImages = imageGallery(sessionId)
     followingLatest.current = initialImages.length > 0 && initialImages.findIndex(image => image.url === initial.url) === initialImages.length - 1
@@ -159,7 +169,7 @@ function ImagePreviewDialog({ sessionId, initial, onClose }) {
     return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [current, onClose])
   return React.createElement('div', {
-    role: 'dialog', 'aria-modal': !floating, 'aria-label': current.name, style: floating ? imageFloatingStyle : imageDialogStyle, onClick: floating ? undefined : onClose,
+    role: 'dialog', 'aria-modal': !floating, 'aria-label': current.name, style: floating ? { ...imageFloatingStyle, height: `clamp(180px, ${Math.round(floatingHeightRatio * 100)}dvh, calc(100dvh - 32px))` } : imageDialogStyle, onClick: floating ? undefined : onClose,
     onPointerDown: event => { pointerStart.current = event.clientX },
     onPointerUp: event => {
       if (pointerStart.current === null) return
@@ -174,9 +184,21 @@ function ImagePreviewDialog({ sessionId, initial, onClose }) {
     React.createElement('a', { href: current.url, download: current.name, style: imageDialogActionStyle }, '下载'),
     React.createElement('button', { type: 'button', style: imageDialogActionStyle, onClick: onClose, 'aria-label': '关闭图片预览' }, '关闭')),
   hasPrevious && React.createElement('button', { type: 'button', style: { ...imageDialogNavStyle, left: 'max(12px, env(safe-area-inset-left))' }, onClick: event => { event.stopPropagation(); navigate(-1) }, 'aria-label': '上一张' }, '‹'),
-  React.createElement('img', { src: current.url, alt: current.name, draggable: false, onClick: event => event.stopPropagation(), style: { display: 'block', maxWidth: floating ? '100%' : 'calc(100vw - 32px)', maxHeight: floating ? '100%' : 'calc(100vh - 32px)', objectFit: 'contain', userSelect: 'none' } }),
+  React.createElement('img', { src: current.url, alt: current.name, draggable: false, onClick: event => event.stopPropagation(), style: { display: 'block', maxWidth: floating ? '100%' : 'calc(100vw - 32px)', maxHeight: floating ? 'calc(100% - 18px)' : 'calc(100vh - 32px)', objectFit: 'contain', userSelect: 'none' } }),
   hasNext && React.createElement('button', { type: 'button', style: { ...imageDialogNavStyle, right: 'max(12px, env(safe-area-inset-right))' }, onClick: event => { event.stopPropagation(); navigate(1) }, 'aria-label': '下一张' }, '›'),
-  images.length > 1 && React.createElement('div', { style: { position: 'absolute', bottom: 'max(12px, env(safe-area-inset-bottom))', color: '#fff', fontSize: '13px' } }, `${index + 1} / ${images.length}`))
+  images.length > 1 && React.createElement('div', { style: { position: 'absolute', bottom: floating ? '22px' : 'max(12px, env(safe-area-inset-bottom))', color: '#fff', fontSize: '13px' } }, `${index + 1} / ${images.length}`),
+  floating && React.createElement('button', {
+    type: 'button', role: 'separator', 'aria-orientation': 'horizontal', 'aria-label': '调整悬浮预览高度', 'aria-valuemin': 20, 'aria-valuemax': 78, 'aria-valuenow': Math.round(floatingHeightRatio * 100), style: imageResizeHandleStyle,
+    onPointerDown: event => { event.preventDefault(); event.stopPropagation(); resizePointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId) },
+    onPointerMove: event => { event.stopPropagation(); resizeFloating(event) },
+    onPointerUp: event => { event.stopPropagation(); resizePointer.current = null; event.currentTarget.releasePointerCapture(event.pointerId) },
+    onPointerCancel: event => { event.stopPropagation(); resizePointer.current = null },
+    onKeyDown: event => {
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+      event.preventDefault()
+      setFloatingHeightRatio(value => Math.min(0.78, Math.max(0.2, value + (event.key === 'ArrowDown' ? 0.05 : -0.05))))
+    },
+  }, React.createElement('span', { style: imageResizeLineStyle })))
 }
 
 function ImagePreview({ sessionId, attachment, sessions }) {
