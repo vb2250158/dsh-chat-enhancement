@@ -124,7 +124,9 @@ function ImagePreviewDialog({ sessionId, initial, onClose }) {
   const [current, setCurrent] = React.useState(initial)
   const [floating, setFloating] = React.useState(false)
   const [floatingHeightRatio, setFloatingHeightRatio] = React.useState(0.38)
+  const [controlsVisible, setControlsVisible] = React.useState(true)
   const pointerStart = React.useRef(null)
+  const swiped = React.useRef(false)
   const resizePointer = React.useRef(null)
   const currentRef = React.useRef(current)
   const followingLatest = React.useRef(false)
@@ -170,26 +172,27 @@ function ImagePreviewDialog({ sessionId, initial, onClose }) {
   }, [current, onClose])
   return React.createElement('div', {
     role: 'dialog', 'aria-modal': !floating, 'aria-label': current.name, style: floating ? { ...imageFloatingStyle, height: `clamp(180px, ${Math.round(floatingHeightRatio * 100)}dvh, calc(100dvh - 32px))` } : imageDialogStyle, onClick: floating ? undefined : onClose,
-    onPointerDown: event => { pointerStart.current = event.clientX },
+    onPointerDown: event => { pointerStart.current = event.clientX; swiped.current = false },
     onPointerUp: event => {
       if (pointerStart.current === null) return
       const distance = event.clientX - pointerStart.current
       pointerStart.current = null
+      if (Math.abs(distance) > 50) swiped.current = true
       if (distance > 50) navigate(-1)
       else if (distance < -50) navigate(1)
     },
   },
-  React.createElement('button', { type: 'button', style: { ...imageDialogActionStyle, ...imageDialogModeStyle }, onClick: event => { event.stopPropagation(); setFloating(value => !value) }, 'aria-label': floating ? '返回全屏预览' : '切换为悬浮预览' }, floating ? '全屏' : '悬浮'),
-  React.createElement('div', { style: imageDialogToolbarStyle, onClick: event => event.stopPropagation() },
+  controlsVisible && React.createElement('button', { type: 'button', style: { ...imageDialogActionStyle, ...imageDialogModeStyle }, onClick: event => { event.stopPropagation(); setFloating(value => !value) }, 'aria-label': floating ? '返回全屏预览' : '切换为悬浮预览' }, floating ? '全屏' : '悬浮'),
+  controlsVisible && React.createElement('div', { style: imageDialogToolbarStyle, onClick: event => event.stopPropagation() },
     React.createElement('a', { href: current.url, download: current.name, style: imageDialogActionStyle }, '下载'),
     React.createElement('button', { type: 'button', style: imageDialogActionStyle, onClick: onClose, 'aria-label': '关闭图片预览' }, '关闭')),
-  hasPrevious && React.createElement('button', { type: 'button', style: { ...imageDialogNavStyle, left: 'max(12px, env(safe-area-inset-left))' }, onClick: event => { event.stopPropagation(); navigate(-1) }, 'aria-label': '上一张' }, '‹'),
-  React.createElement('img', { src: current.url, alt: current.name, draggable: false, onClick: event => event.stopPropagation(), style: floating
+  controlsVisible && hasPrevious && React.createElement('button', { type: 'button', style: { ...imageDialogNavStyle, left: 'max(12px, env(safe-area-inset-left))' }, onClick: event => { event.stopPropagation(); navigate(-1) }, 'aria-label': '上一张' }, '‹'),
+  React.createElement('img', { src: current.url, alt: current.name, draggable: false, role: 'button', tabIndex: 0, 'aria-label': controlsVisible ? '隐藏图片预览控件' : '显示图片预览控件', onClick: event => { event.stopPropagation(); if (swiped.current) { swiped.current = false; return }; setControlsVisible(value => !value) }, onKeyDown: event => { if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault(); setControlsVisible(value => !value) }, style: floating
     ? { display: 'block', width: '100%', height: 'calc(100% - 18px)', minWidth: 0, minHeight: 0, objectFit: 'contain', userSelect: 'none' }
     : { display: 'block', maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)', objectFit: 'contain', userSelect: 'none' } }),
-  hasNext && React.createElement('button', { type: 'button', style: { ...imageDialogNavStyle, right: 'max(12px, env(safe-area-inset-right))' }, onClick: event => { event.stopPropagation(); navigate(1) }, 'aria-label': '下一张' }, '›'),
-  images.length > 1 && React.createElement('div', { style: { position: 'absolute', bottom: floating ? '22px' : 'max(12px, env(safe-area-inset-bottom))', color: '#fff', fontSize: '13px' } }, `${index + 1} / ${images.length}`),
-  floating && React.createElement('button', {
+  controlsVisible && hasNext && React.createElement('button', { type: 'button', style: { ...imageDialogNavStyle, right: 'max(12px, env(safe-area-inset-right))' }, onClick: event => { event.stopPropagation(); navigate(1) }, 'aria-label': '下一张' }, '›'),
+  controlsVisible && images.length > 1 && React.createElement('div', { style: { position: 'absolute', bottom: floating ? '22px' : 'max(12px, env(safe-area-inset-bottom))', color: '#fff', fontSize: '13px' } }, `${index + 1} / ${images.length}`),
+  controlsVisible && floating && React.createElement('button', {
     type: 'button', role: 'separator', 'aria-orientation': 'horizontal', 'aria-label': '调整悬浮预览高度', 'aria-valuemin': 20, 'aria-valuemax': 78, 'aria-valuenow': Math.round(floatingHeightRatio * 100), style: imageResizeHandleStyle,
     onPointerDown: event => { event.preventDefault(); event.stopPropagation(); resizePointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId) },
     onPointerMove: event => { event.stopPropagation(); resizeFloating(event) },
