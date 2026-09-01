@@ -14,23 +14,37 @@ const IMAGE_MEDIA_TYPES = {
 }
 
 const VIDEO_MEDIA_TYPES = { '.mp4': 'video/mp4', '.webm': 'video/webm' }
+const AUDIO_MEDIA_TYPES = {
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  '.m4a': 'audio/mp4',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.wav': 'audio/wav',
+}
+const DEFAULT_MAX_AUDIO_BYTES = 50 * 1024 * 1024
 const DEFAULT_MAX_VIDEO_BYTES = 50 * 1024 * 1024
 const DEFAULT_MAX_MARKDOWN_BYTES = 2 * 1024 * 1024
+const MEDIA_SETTINGS_NAMESPACE = 'chat-enhancement'
 
 const imageMediaTypeFor = (filePath) => IMAGE_MEDIA_TYPES[extname(filePath).toLowerCase()]
+const audioMediaTypeFor = (filePath) => AUDIO_MEDIA_TYPES[extname(filePath).toLowerCase()]
 const videoMediaTypeFor = (filePath) => VIDEO_MEDIA_TYPES[extname(filePath).toLowerCase()]
 const isMarkdownPath = (filePath) => ['.md', '.markdown'].includes(extname(filePath).toLowerCase())
 
 function resolveConfig(config = {}) {
+  const maxAudioBytes = config.maxAudioBytes ?? DEFAULT_MAX_AUDIO_BYTES
+  if (!Number.isSafeInteger(maxAudioBytes) || maxAudioBytes < 1) throw new TypeError('maxAudioBytes must be a positive safe integer.')
   const maxVideoBytes = config.maxVideoBytes ?? DEFAULT_MAX_VIDEO_BYTES
   if (!Number.isSafeInteger(maxVideoBytes) || maxVideoBytes < 1) throw new TypeError('maxVideoBytes must be a positive safe integer.')
   const maxMarkdownBytes = config.maxMarkdownBytes ?? DEFAULT_MAX_MARKDOWN_BYTES
   if (!Number.isSafeInteger(maxMarkdownBytes) || maxMarkdownBytes < 1) throw new TypeError('maxMarkdownBytes must be a positive safe integer.')
-  return { maxVideoBytes, maxMarkdownBytes }
+  return { maxAudioBytes, maxVideoBytes, maxMarkdownBytes }
 }
 
 const imagePreviewMarker = (value) => JSON.stringify({ type: 'dsh-chat-enhancement/image', path: value.path, attachment: value.image })
-const videoPreviewMarker = (value) => JSON.stringify({ type: 'dsh-chat-enhancement/video', token: value.token, mediaType: value.mediaType, name: value.name, bytes: value.bytes })
+const mediaPreviewMarker = (kind, value) => JSON.stringify({ type: `dsh-chat-enhancement/${kind}`, token: value.token, mediaType: value.mediaType, name: value.name, bytes: value.bytes })
 
 function imageOutputSchema() {
   return { type: 'object', additionalProperties: false, required: ['path', 'image'], properties: {
@@ -42,7 +56,7 @@ function imageOutputSchema() {
   } }
 }
 
-function videoOutputSchema() {
+function mediaOutputSchema() {
   return { type: 'object', additionalProperties: false, required: ['token', 'mediaType', 'name', 'bytes'], properties: {
     token: { type: 'string' }, mediaType: { type: 'string' }, name: { type: 'string' }, bytes: { type: 'integer' },
   } }
@@ -68,24 +82,43 @@ async function resolveRegularTarget(ctx, args, exec) {
   return target
 }
 
-/** Ephemeral per-session video bytes, addressed only by an opaque tool-result token. */
-class VideoStore {
+/** Ephemeral per-session audio and video bytes, addressed only by opaque tool-result tokens. */
+class MediaStore {
   #entries = new Map()
 
-  constructor(maxVideoBytes) {
+  constructor(maxAudioBytes, maxVideoBytes) {
+    this.maxAudioBytes = maxAudioBytes
     this.maxVideoBytes = maxVideoBytes
   }
 
-  async add(ctx, args, exec) {
-    const mediaType = videoMediaTypeFor(args.file_path)
-    if (mediaType === undefined) throw new Error('show_video accepts MP4 or WebM files only.')
-    if (exec.agent === undefined) throw new Error('show_video requires an active Agent session.')
+  async #add(ctx, args, exec, definition) {
+    const mediaType = definition.mediaTypeFor(args.file_path)
+    if (mediaType === undefined) throw new Error(definition.invalidTypeMessage)
+    if (exec.agent === undefined) throw new Error(`${definition.toolName} requires an active Agent session.`)
     const target = await resolveRegularTarget(ctx, args, exec)
-    const data = await ctx.fs.readBytes(target, exec.signal, this.maxVideoBytes)
+    const data = await ctx.fs.readBytes(target, exec.signal, definition.maxBytes)
     const token = randomUUID()
     const name = basename(target.displayPath)
     this.#entries.set(token, { sessionId: String(exec.agent.id), data, mediaType, name })
     return { token, mediaType, name, bytes: data.byteLength }
+  }
+
+  async addAudio(ctx, args, exec) {
+    return await this.#add(ctx, args, exec, {
+      toolName: 'show_audio',
+      mediaTypeFor: audioMediaTypeFor,
+      maxBytes: this.maxAudioBytes,
+      invalidTypeMessage: 'show_audio accepts MP3, WAV, M4A, AAC, OGG, Opus, or FLAC files only.',
+    })
+  }
+
+  async addVideo(ctx, args, exec) {
+    return await this.#add(ctx, args, exec, {
+      toolName: 'show_video',
+      mediaTypeFor: videoMediaTypeFor,
+      maxBytes: this.maxVideoBytes,
+      invalidTypeMessage: 'show_video accepts MP4 or WebM files only.',
+    })
   }
 
   read(request) {
@@ -100,14 +133,14 @@ class VideoStore {
   clear() { this.#entries.clear() }
 }
 
-function createMediaService(protocol, videoStore) {
+function createMediaService(protocol, mediaStore) {
   const initializers = []
   class ChatMediaService extends protocol.TypertRemoteService {
     constructor(ctx) {
       super(ctx, 'chatMedia')
       for (const initialize of initializers) initialize.call(this)
     }
-    async read(request) { return videoStore.read(request) }
+    async read(request) { return mediaStore.read(request) }
   }
   protocol.Remote('read')(ChatMediaService.prototype.read, {
     private: false, static: false, name: 'read', addInitializer(initializer) { initializers.push(initializer) },
@@ -165,15 +198,31 @@ function createMarkdownService(protocol, ctx, maxMarkdownBytes) {
 }
 
 let cachedProfileProtocol
+let cachedProfileRequire
+
+function profileRequire() {
+  if (cachedProfileRequire !== undefined) return cachedProfileRequire
+  const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
+  cachedProfileRequire = createRequire(join(dshHome, 'profiles', 'web', 'package.json'))
+  return cachedProfileRequire
+}
 
 function profileProtocol() {
   if (cachedProfileProtocol !== undefined) return cachedProfileProtocol
-  const dshHome = resolve(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'))
-  const profileRequire = createRequire(join(dshHome, 'profiles', 'web', 'package.json'))
-  const protocol = profileRequire('@deepseek-ai/dsh-typert-protocol')
+  const protocol = profileRequire()('@deepseek-ai/dsh-typert-protocol')
   if (typeof protocol.TypertRemoteService !== 'function' || typeof protocol.Remote !== 'function') throw new Error('dsh-chat-enhancement requires the profile Typert protocol.')
   cachedProfileProtocol = protocol
   return cachedProfileProtocol
+}
+
+function registerMediaSettings(ctx) {
+  ctx.inject(['settings'], (settingsCtx) => {
+    const z = profileRequire()('@deepseek-ai/schemastery')
+    settingsCtx.settings.register(MEDIA_SETTINGS_NAMESPACE, z.object({
+      audioAutoplay: z.boolean().default(false),
+      videoAutoplay: z.boolean().default(false),
+    }))
+  })
 }
 
 /** Register the Agent-visible image presentation tool while attachments are available. */
@@ -200,29 +249,41 @@ function applyShowImageTool(ctx) {
   })
 }
 
-function applyShowVideoTool(ctx, videoStore) {
+function applyShowVideoTool(ctx, mediaStore) {
   ctx.tools.register({
     name: 'show_video',
     description: 'Display an MP4 or WebM video to the user in the chat. Use this when the user asks to watch an existing video or when a video result should be presented visually. The video is available only to the current session while DSH remains running.',
     parameters: filePathParameters('Video path, resolved relative to the current session workspace.'),
-    output: { schema: videoOutputSchema(), render: (_args, value) => [{ type: 'text', text: videoPreviewMarker(value) }] },
-    execute: (args, exec) => videoStore.add(ctx, args, exec),
+    output: { schema: mediaOutputSchema(), render: (_args, value) => [{ type: 'text', text: mediaPreviewMarker('video', value) }] },
+    execute: (args, exec) => mediaStore.addVideo(ctx, args, exec),
+  })
+}
+
+function applyShowAudioTool(ctx, mediaStore) {
+  ctx.tools.register({
+    name: 'show_audio',
+    description: 'Display an MP3, WAV, M4A, AAC, OGG, Opus, or FLAC audio file to the user in the chat. Use this when the user asks to listen to an existing audio file or when an audio result should be presented. The audio is available only to the current session while DSH remains running.',
+    parameters: filePathParameters('Audio path, resolved relative to the current session workspace.'),
+    output: { schema: mediaOutputSchema(), render: (_args, value) => [{ type: 'text', text: mediaPreviewMarker('audio', value) }] },
+    execute: (args, exec) => mediaStore.addAudio(ctx, args, exec),
   })
 }
 
 export const name = 'chat-enhancement'
 export const inject = ['tools', 'fs', 'agents']
 
-/** Compose Agent media tools and the current-session video reader. */
+/** Compose Agent media tools and the current-session media reader. */
 export function apply(ctx, config = {}) {
   const resolved = resolveConfig(config)
-  const videoStore = new VideoStore(resolved.maxVideoBytes)
+  registerMediaSettings(ctx)
+  const mediaStore = new MediaStore(resolved.maxAudioBytes, resolved.maxVideoBytes)
   const protocol = profileProtocol()
-  const ChatMediaService = createMediaService(protocol, videoStore)
+  const ChatMediaService = createMediaService(protocol, mediaStore)
   const ChatMarkdownService = createMarkdownService(protocol, ctx, resolved.maxMarkdownBytes)
-  ctx.effect(() => () => videoStore.clear(), 'chat enhancement video cache')
+  ctx.effect(() => () => mediaStore.clear(), 'chat enhancement media cache')
   ctx.inject(['attachments'], applyShowImageTool)
-  applyShowVideoTool(ctx, videoStore)
+  applyShowAudioTool(ctx, mediaStore)
+  applyShowVideoTool(ctx, mediaStore)
   ctx.inject(['agents'], () => {
     new ChatMediaService(ctx)
     new ChatMarkdownService(ctx)

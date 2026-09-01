@@ -13,8 +13,24 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
 
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(manifest.dsh.client.platform, 'web')
+  assert.ok(manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-settings'))
   assert.equal(manifest.exports['./typert'], './lib/typert.host.js')
-  assert.match(client, /read_image.*show_image.*show_video/s)
+  assert.match(client, /read_image.*show_image.*show_video.*show_audio/s)
+  assert.match(client, /React\.createElement\('audio'/)
+  assert.match(client, /ImagePreviewDialog/)
+  assert.match(client, /data-dsh-image-preview/)
+  assert.match(client, /download: current\.name/)
+  assert.match(client, /关闭图片预览/)
+  assert.match(client, /aria-label': '上一张'/)
+  assert.match(client, /aria-label': '下一张'/)
+  assert.match(client, /imageFloatingStyle/)
+  assert.match(client, /切换为悬浮预览/)
+  assert.match(client, /followingLatest/)
+  assert.match(client, /imageGallery\(sessionId\)\.at\(-1\)/)
+  assert.match(client, /settingsScope/)
+  assert.match(client, /chat-enhancement-media/)
+  assert.match(client, /audioAutoplay/)
+  assert.match(client, /videoAutoplay/)
   assert.match(client, /MarkdownText/)
   assert.match(client, /conversation\.input\.dock/)
   assert.match(client, /ToolCallGroupController/)
@@ -38,10 +54,14 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.doesNotMatch(client, /file:\/\//)
   assert.match(host, /name: 'show_image'/)
   assert.match(host, /name: 'show_video'/)
+  assert.match(host, /name: 'show_audio'/)
   assert.match(host, /attachments\.saveImage/)
   assert.match(host, /chatMarkdown/)
   assert.match(host, /ctx\.fs\.contains/)
   assert.match(host, /maxMarkdownBytes/)
+  assert.match(host, /settingsCtx\.settings\.register\(MEDIA_SETTINGS_NAMESPACE/)
+  assert.match(host, /audioAutoplay: z\.boolean\(\)\.default\(false\)/)
+  assert.match(host, /videoAutoplay: z\.boolean\(\)\.default\(false\)/)
   assert.ok(host.indexOf('const ChatMediaService = createMediaService') < host.indexOf("ctx.inject(['agents']"))
   assert.ok(host.indexOf('const ChatMarkdownService = createMarkdownService') < host.indexOf("ctx.inject(['agents']"))
   assert.match(host, /ctx\.inject\(\['agents'\], \(\) => \{\n    new ChatMediaService\(ctx\)\n    new ChatMarkdownService\(ctx\)/)
@@ -59,13 +79,13 @@ test('show_image writes its managed attachment into the session tool result', as
     tools: { register(value) { tools.set(value.name, value) } },
     fs: {
       async resolve(filePath, options) {
-        assert.ok(filePath === 'image.png' || filePath === 'clip.mp4')
+        assert.ok(filePath === 'image.png' || filePath === 'clip.mp4' || filePath === 'track.mp3')
         assert.equal(options.cwd, 'C:/workspace')
         return { displayPath: `C:/workspace/${filePath}` }
       },
       async stat() { return { type: 'file' } },
       async readBytes(_target, _signal, maxBytes) {
-        assert.ok(maxBytes === 1024 || maxBytes === 4)
+        assert.ok(maxBytes === 1024 || maxBytes === 4 || maxBytes === 5)
         return Uint8Array.of(1, 2, 3)
       },
     },
@@ -82,7 +102,7 @@ test('show_image writes its managed attachment into the session tool result', as
     },
   }
 
-  apply(context, { maxVideoBytes: 4 })
+  apply(context, { maxAudioBytes: 5, maxVideoBytes: 4 })
   const imageTool = tools.get('show_image')
   assert.equal(imageTool.name, 'show_image')
   assert.deepEqual(imageTool.parameters, {
@@ -115,6 +135,24 @@ test('show_image writes its managed attachment into the session tool result', as
   assert.equal(video.mediaType, 'video/mp4')
   assert.equal(video.bytes, 3)
   assert.match(videoTool.output.render({}, video)[0].text, /dsh-chat-enhancement\/video/)
+
+  const audioTool = tools.get('show_audio')
+  assert.deepEqual(audioTool.parameters, {
+    type: 'object',
+    additionalProperties: false,
+    required: ['file_path'],
+    properties: { file_path: { type: 'string', description: 'Audio path, resolved relative to the current session workspace.' } },
+  })
+  const audio = await audioTool.execute({ file_path: 'track.mp3' }, { agent: { id: 'session-a', session: { header: { cwd: 'C:/workspace' } } }, signal: new AbortController().signal })
+  assert.equal(audio.mediaType, 'audio/mpeg')
+  assert.equal(audio.bytes, 3)
+  assert.deepEqual(JSON.parse(audioTool.output.render({}, audio)[0].text), {
+    type: 'dsh-chat-enhancement/audio',
+    token: audio.token,
+    mediaType: 'audio/mpeg',
+    name: 'track.mp3',
+    bytes: 3,
+  })
 })
 
 test('client groups original tool and context rows without replacing the tool-call node', async () => {
@@ -141,9 +179,20 @@ test('client groups original tool and context rows without replacing the tool-ca
       inject(_name, callback) { callback() },
       register(options, component) { registrations.push({ options, component }); return () => {} },
     },
+    settingsScope: {
+      bind(spec) {
+        assert.equal(spec.namespace, 'chat-enhancement')
+        return {
+          getSnapshot() { return { status: 'ready', value: { audioAutoplay: false, videoAutoplay: false }, writable: true } },
+          subscribe() { return () => {} },
+          async set() {},
+        }
+      },
+    },
   }
 
   await plugin.apply(context)
+  assert.ok(plugin.inject.includes('settingsScope'))
   assert.equal(registrations.some(({ options }) => options.name === 'conversation.chat.node'), false)
   const groupController = registrations.find(({ options }) => options.id === 'chat-enhancement-tool-groups')
   assert.equal(groupController.options.name, 'conversation.input.dock')
@@ -151,4 +200,10 @@ test('client groups original tool and context rows without replacing the tool-ca
   const thinkingController = registrations.find(({ options }) => options.id === 'chat-enhancement-thinking-groups')
   assert.equal(thinkingController.options.name, 'conversation.input.dock')
   assert.equal(thinkingController.component.name, 'ThinkingGroupController')
+  const audioView = registrations.find(({ options }) => options.key === 'show_audio')
+  assert.equal(audioView.options.name, 'tool.call.toolview')
+  const mediaSettings = registrations.find(({ options }) => options.id === 'chat-enhancement-media')
+  assert.equal(mediaSettings.options.name, 'settings.section')
+  assert.equal(mediaSettings.options.label(), '媒体播放')
+  assert.equal(mediaSettings.component.name, 'MediaSettingsSection')
 })
