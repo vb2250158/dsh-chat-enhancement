@@ -27,6 +27,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /floatingHeightRatio/)
   assert.match(client, /调整悬浮预览高度/)
   assert.match(client, /Math\.min\(0\.78, Math\.max\(0\.2/)
+  assert.match(client, /height: 'calc\(100% - 18px\)'/)
   assert.match(client, /切换为悬浮预览/)
   assert.match(client, /followingLatest/)
   assert.match(client, /imageGallery\(sessionId\)\.at\(-1\)/)

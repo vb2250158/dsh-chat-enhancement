@@ -184,7 +184,9 @@ function ImagePreviewDialog({ sessionId, initial, onClose }) {
     React.createElement('a', { href: current.url, download: current.name, style: imageDialogActionStyle }, '下载'),
     React.createElement('button', { type: 'button', style: imageDialogActionStyle, onClick: onClose, 'aria-label': '关闭图片预览' }, '关闭')),
   hasPrevious && React.createElement('button', { type: 'button', style: { ...imageDialogNavStyle, left: 'max(12px, env(safe-area-inset-left))' }, onClick: event => { event.stopPropagation(); navigate(-1) }, 'aria-label': '上一张' }, '‹'),
-  React.createElement('img', { src: current.url, alt: current.name, draggable: false, onClick: event => event.stopPropagation(), style: { display: 'block', maxWidth: floating ? '100%' : 'calc(100vw - 32px)', maxHeight: floating ? 'calc(100% - 18px)' : 'calc(100vh - 32px)', objectFit: 'contain', userSelect: 'none' } }),
+  React.createElement('img', { src: current.url, alt: current.name, draggable: false, onClick: event => event.stopPropagation(), style: floating
+    ? { display: 'block', width: '100%', height: 'calc(100% - 18px)', minWidth: 0, minHeight: 0, objectFit: 'contain', userSelect: 'none' }
+    : { display: 'block', maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)', objectFit: 'contain', userSelect: 'none' } }),
   hasNext && React.createElement('button', { type: 'button', style: { ...imageDialogNavStyle, right: 'max(12px, env(safe-area-inset-right))' }, onClick: event => { event.stopPropagation(); navigate(1) }, 'aria-label': '下一张' }, '›'),
   images.length > 1 && React.createElement('div', { style: { position: 'absolute', bottom: floating ? '22px' : 'max(12px, env(safe-area-inset-bottom))', color: '#fff', fontSize: '13px' } }, `${index + 1} / ${images.length}`),
   floating && React.createElement('button', {
