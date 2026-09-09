@@ -5,6 +5,19 @@ import vm from 'node:vm'
 
 const root = new URL('..', import.meta.url)
 
+async function loadBrowserPlugin() {
+  const client = await readFile(new URL('./lib/client.js', root), 'utf8')
+  let loaderEntry
+  vm.runInNewContext(client, {
+    window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
+  })
+  return loaderEntry.factory((name) => {
+    if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {} }
+    throw new Error(`unexpected browser dependency: ${name}`)
+  })
+}
+
 test('declares the media bundle, browser previews, and bounded Markdown reader', async () => {
   const manifest = JSON.parse(await readFile(new URL('./package.json', root), 'utf8'))
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
@@ -163,16 +176,7 @@ test('show_image writes its managed attachment into the session tool result', as
 })
 
 test('client groups original tool and context rows without replacing the tool-call node', async () => {
-  const client = await readFile(new URL('./lib/client.js', root), 'utf8')
-  let loaderEntry
-  vm.runInNewContext(client, {
-    window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
-  })
-  const plugin = loaderEntry.factory((name) => {
-    if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {} }
-    throw new Error(`unexpected browser dependency: ${name}`)
-  })
+  const plugin = await loadBrowserPlugin()
   const registrations = []
   const context = {
     remote: { async $mount() { return () => {} } },
@@ -201,6 +205,9 @@ test('client groups original tool and context rows without replacing the tool-ca
   await plugin.apply(context)
   assert.ok(plugin.inject.includes('settingsScope'))
   assert.equal(registrations.some(({ options }) => options.name === 'conversation.chat.node'), false)
+  const autoplayController = registrations.find(({ options }) => options.id === 'chat-enhancement-media-autoplay-session')
+  assert.equal(autoplayController.options.name, 'conversation.input.dock')
+  assert.equal(autoplayController.component.name, 'MediaAutoplaySessionController')
   const groupController = registrations.find(({ options }) => options.id === 'chat-enhancement-tool-groups')
   assert.equal(groupController.options.name, 'conversation.input.dock')
   assert.equal(groupController.component.name, 'ToolCallGroupController')
@@ -213,4 +220,22 @@ test('client groups original tool and context rows without replacing the tool-ca
   assert.equal(mediaSettings.options.name, 'settings.section')
   assert.equal(mediaSettings.options.label(), '媒体播放')
   assert.equal(mediaSettings.component.name, 'MediaSettingsSection')
+})
+
+test('autoplay gate ignores restored history and only accepts a newly settled Agent display', async () => {
+  const { createMediaAutoplayGate } = await loadBrowserPlugin()
+  const gate = createMediaAutoplayGate()
+
+  assert.equal(gate.observe('historical-audio', 100, true, false), false)
+  assert.equal(gate.observe('historical-video', 200, true, true), false)
+
+  gate.markReady(1_000)
+
+  assert.equal(gate.observe('historical-audio', 100, true, true), false)
+  assert.equal(gate.observe('late-hydrated-history', 999, true, true), false)
+  assert.equal(gate.observe('new-audio-after-turn', 1_001, true, false), false)
+  assert.equal(gate.observe('new-audio-after-turn', 1_001, true, true), false)
+  assert.equal(gate.observe('new-video-while-agent-runs', 1_002, true, true), true)
+  assert.equal(gate.observe('new-video-while-agent-runs', 1_002, true, true), false)
+  assert.equal(gate.observe('autoplay-disabled', 1_003, false, true), false)
 })

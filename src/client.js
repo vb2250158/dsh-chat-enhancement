@@ -21,6 +21,41 @@ const imageResizeLineStyle = { width: '72px', height: '3px', borderRadius: '999p
 const settingsSectionStyle = { display: 'grid', gap: '18px', minWidth: 0 }
 const settingsRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '20px', padding: '14px 0', borderBottom: '1px solid var(--dsw-alias-line-primary)' }
 
+/** Track media results observed by one mounted chat so history hydration cannot request playback. */
+export function createMediaAutoplayGate() {
+  const observedCallIds = new Set()
+  let openedAt = Number.POSITIVE_INFINITY
+  return {
+    markReady(time = Date.now()) { openedAt = time },
+    observe(callId, resultTime, enabled, running) {
+      if (observedCallIds.has(callId)) return false
+      observedCallIds.add(callId)
+      return resultTime >= openedAt && enabled && running
+    },
+  }
+}
+
+const mediaAutoplayGates = new Map()
+
+function mediaAutoplayGate(sessionId) {
+  let gate = mediaAutoplayGates.get(sessionId)
+  if (gate === undefined) {
+    gate = createMediaAutoplayGate()
+    mediaAutoplayGates.set(sessionId, gate)
+  }
+  return gate
+}
+
+function MediaAutoplaySessionController({ sessionId }) {
+  const gate = mediaAutoplayGate(sessionId)
+  React.useEffect(() => {
+    let mounted = true
+    queueMicrotask(() => { if (mounted) gate.markReady() })
+    return () => { mounted = false; mediaAutoplayGates.delete(sessionId) }
+  }, [gate, sessionId])
+  return null
+}
+
 function pathFromArgs(argsRaw) {
   try {
     const parsed = JSON.parse(argsRaw)
@@ -219,28 +254,28 @@ function ImagePreview({ sessionId, attachment, sessions }) {
   )
 }
 
-function VideoPreview({ sessionId, preview, readMedia, autoplay }) {
+function VideoPreview({ sessionId, preview, readMedia, shouldAutoplay }) {
   const { url, error } = useMediaUrl(sessionId, preview, readMedia)
   const player = React.useRef(null)
   React.useEffect(() => {
-    if (!autoplay || url === null) return
+    if (!shouldAutoplay || url === null) return
     void player.current?.play().catch(() => {})
-  }, [autoplay, url])
+  }, [shouldAutoplay, url])
   if (error !== null) return React.createElement('span', { role: 'alert', style: { color: 'var(--dsw-alias-state-error-primary)' } }, `播放失败：${error}`)
   if (url === null) return React.createElement('span', { role: 'status', style: mutedStyle }, '加载视频…')
-  return React.createElement('video', { ref: player, controls: true, autoPlay: autoplay, preload: 'metadata', src: url, style: { display: 'block', maxWidth: '360px', maxHeight: '240px', borderRadius: '8px' } })
+  return React.createElement('video', { ref: player, controls: true, preload: 'metadata', src: url, style: { display: 'block', maxWidth: '360px', maxHeight: '240px', borderRadius: '8px' } })
 }
 
-function AudioPreview({ sessionId, preview, readMedia, autoplay }) {
+function AudioPreview({ sessionId, preview, readMedia, shouldAutoplay }) {
   const { url, error } = useMediaUrl(sessionId, preview, readMedia)
   const player = React.useRef(null)
   React.useEffect(() => {
-    if (!autoplay || url === null) return
+    if (!shouldAutoplay || url === null) return
     void player.current?.play().catch(() => {})
-  }, [autoplay, url])
+  }, [shouldAutoplay, url])
   if (error !== null) return React.createElement('span', { role: 'alert', style: { color: 'var(--dsw-alias-state-error-primary)' } }, `播放失败：${error}`)
   if (url === null) return React.createElement('span', { role: 'status', style: mutedStyle }, '加载音频…')
-  return React.createElement('audio', { ref: player, controls: true, autoPlay: autoplay, preload: 'metadata', src: url, style: { display: 'block', width: 'min(100%, 420px)' } })
+  return React.createElement('audio', { ref: player, controls: true, preload: 'metadata', src: url, style: { display: 'block', width: 'min(100%, 420px)' } })
 }
 
 function useSettingsSnapshot(scope) {
@@ -262,9 +297,9 @@ function MediaSettingsSection({ mediaSettings }) {
     React.createElement('input', { type: 'checkbox', role: 'switch', checked: preferences[field], disabled: !writable, onChange: event => { void mediaSettings.set(field, event.target.checked) } }))
   return React.createElement('section', { style: settingsSectionStyle },
     React.createElement('h2', null, '媒体播放'),
-    row('audioAutoplay', '音频自动播放'),
-    row('videoAutoplay', '视频自动播放'),
-    React.createElement('p', { style: mutedStyle }, '浏览器可能阻止未交互页面的有声自动播放。'))
+    row('audioAutoplay', 'Agent 展示音频时自动播放'),
+    row('videoAutoplay', 'Agent 展示视频时自动播放'),
+    React.createElement('p', { style: mutedStyle }, '只在当前聊天已打开后，Agent 新完成展示调用时尝试播放；进入聊天或恢复历史消息不会播放。浏览器仍可能阻止未交互页面的有声自动播放。'))
 }
 
 function MarkdownPreviewController({ sessionId, readMarkdown }) {
@@ -301,9 +336,12 @@ function MarkdownPreviewController({ sessionId, readMarkdown }) {
   )
 }
 
-function MediaToolView({ block, sessionId, sessions, readMedia, mediaSettings }) {
+function MediaToolView({ block, callId, sessionId, useSession, sessions, readMedia, mediaSettings }) {
   const preview = previewFromBlock(block)
   const preferences = mediaPreferences(useSettingsSnapshot(mediaSettings))
+  const running = useSession(snapshot => snapshot.running)
+  const autoplayEnabled = preview?.kind === 'audio' ? preferences.audioAutoplay : preview?.kind === 'video' ? preferences.videoAutoplay : false
+  const shouldAutoplay = preview === null ? false : mediaAutoplayGate(sessionId).observe(callId, block.time, autoplayEnabled, running)
   const path = preview?.kind === 'image' ? preview.path ?? pathFromArgs(block.argsRaw ?? block.call?.argsRaw ?? '') : preview?.name ?? pathFromArgs(block.argsRaw ?? block.call?.argsRaw ?? '')
   const title = preview?.kind === 'audio' ? `展示音频 · ${path}` : preview?.kind === 'video' ? `展示视频 · ${path}` : preview?.kind === 'image' ? `展示图片 · ${path}` : '展示媒体'
   const summary = preview?.kind === 'image' ? `${preview.attachment.width} × ${preview.attachment.height}` : preview?.kind === 'audio' || preview?.kind === 'video' ? `${Math.ceil(preview.bytes / 1024 / 1024)} MiB` : ('kind' in block && block.isError ? '展示失败' : '正在准备…')
@@ -311,8 +349,8 @@ function MediaToolView({ block, sessionId, sessions, readMedia, mediaSettings })
     React.createElement('div', { style: { fontWeight: 600 } }, title),
     React.createElement('div', { style: mutedStyle }, summary),
     preview?.kind === 'image' && React.createElement(ImagePreview, { sessionId, attachment: preview.attachment, sessions }),
-    preview?.kind === 'video' && React.createElement(VideoPreview, { sessionId, preview, readMedia, autoplay: preferences.videoAutoplay }),
-    preview?.kind === 'audio' && React.createElement(AudioPreview, { sessionId, preview, readMedia, autoplay: preferences.audioAutoplay })
+    preview?.kind === 'video' && React.createElement(VideoPreview, { sessionId, preview, readMedia, shouldAutoplay }),
+    preview?.kind === 'audio' && React.createElement(AudioPreview, { sessionId, preview, readMedia, shouldAutoplay })
   )
 }
 
@@ -530,6 +568,9 @@ export async function apply(ctx) {
     if (!result.ok || result.value === undefined) throw new Error(result.error?.message ?? 'Markdown 读取失败。')
     return result.value
   }
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock', id: 'chat-enhancement-media-autoplay-session', order: 99,
+  }, MediaAutoplaySessionController))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'chat-enhancement-markdown-preview', order: 100,
     inject: () => ({ readMarkdown }),
