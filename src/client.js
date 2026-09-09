@@ -585,7 +585,10 @@ export async function apply(ctx) {
     name: 'settings.section', id: 'chat-enhancement-media', order: 65, label: () => '媒体播放',
     inject: () => ({ mediaSettings }),
   }, MediaSettingsSection))
-  for (const key of ['read_image', 'show_image', 'show_video', 'show_audio']) {
+  // `read_image` is already rendered by DSH's built-in read-image toolview.
+  // Registering it here causes the keyed slot to reject the whole custom
+  // media-view batch, which can interrupt client initialization on reload.
+  for (const key of ['show_image', 'show_video', 'show_audio']) {
     ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, locale: 'conversation' }, (props) => React.createElement(MediaToolView, { ...props, sessions, readMedia, mediaSettings })))
   }
   return dispose
