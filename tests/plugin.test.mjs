@@ -5,6 +5,25 @@ import vm from 'node:vm'
 
 const root = new URL('..', import.meta.url)
 
+test('generated preview preserves native image priority over text media markers', async () => {
+  const bundle = await readFile(new URL('./lib/client.js', root), 'utf8')
+  let entry
+  vm.runInNewContext(bundle.replace('return { inject, apply, createMediaAutoplayGate }', 'return { previewFromBlock }'), {
+    window: { __ModuleLoader__: { load(value) { entry = value } } },
+  })
+  const { previewFromBlock } = entry.factory(() => ({}))
+  const attachment = { id: 'fixture-image' }
+  for (const type of ['audio', 'video']) {
+    const result = previewFromBlock({ kind: 'result', content: [
+      { type: 'text', text: JSON.stringify({ type: `dsh-chat-enhancement/${type}`, token: 'fixture-token', mediaType: `${type}/fixture`, name: 'fixture' }) },
+      { type: 'image', attachment },
+    ] })
+    assert.equal(result.kind, 'image')
+    assert.equal(result.attachment, attachment)
+    assert.equal(result.path, null)
+  }
+})
+
 async function loadBrowserPlugin() {
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
   let loaderEntry
@@ -180,6 +199,8 @@ test('client groups original tool and context rows without replacing the tool-ca
   const plugin = await loadBrowserPlugin()
   const registrations = []
   const context = {
+    effect(callback) { callback() },
+    locale: { register(namespace, dictionaries) { assert.equal(namespace, 'chat-enhancement-annotations'); assert.ok(dictionaries.en); return () => {} } },
     remote: { async $mount() { return () => {} } },
     get(name) { return name === 'sessions' ? { binding() {} } : undefined },
     reflect: { get(name) {

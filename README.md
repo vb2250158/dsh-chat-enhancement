@@ -4,7 +4,15 @@
 
 ## 更新日志
 
-### 0.3.24 — Unreleased
+### 0.3.25 — Unreleased
+
+- 增加聊天及 Markdown 预览选区批注：选中文字后点击「批注」，输入多行意见，再「添加到聊天」；引用与批注追加到当前草稿，最后由用户手动发送。
+- 追加复用 DSH 会话输入事件，保留已有文本、引用芯片及附件；会话切换、命令模式或提交冲突不会将批注误写入其他会话。
+- 浏览器产物通过 `npm run build:client` 从源码生成。
+- 没有新增持久化数据或配置迁移；安装后需重新加载插件并刷新页面。批注作为普通用户消息文本发送，引用原文和批注会占用相应上下文。
+- 验证：10 项单元及 React/DOM 测试通过，真实 DSH 编辑器集成验证引用芯片与附件保留、零自动发送；页面与主题验收独立于这些测试。
+
+### 0.3.24
 
 - 修复媒体自动播放：进入或切换聊天、恢复历史工具结果时保持静音，仅在当前聊天已打开后由 Agent 新完成媒体展示调用时尝试播放。
 - 设置项文案明确为“Agent 展示时自动播放”，并说明浏览器自动播放策略仍可能拦截有声播放。
@@ -31,6 +39,12 @@
 
 音频和视频缓存仅在 DSH 运行期间有效，且默认单文件上限均为 50 MiB。Markdown 默认读取上限为 2 MiB。可通过该插件的 `maxAudioBytes`、`maxVideoBytes`、`maxMarkdownBytes` 配置调整；不要把本机路径、NAS 路径或凭据写入共享配置。插件通过 `./typert` 为媒体和 Markdown 读取导出严格的 Host Remote 描述，预览服务在根 Host 上下文完成注册；已存在和后续打开的会话均通过相同的 Host 端点读取预览数据。PDF 仍需要独立的受管读取协议。
 
+## 选区批注
+
+在同一聊天流或 Markdown 预览内选择文字，点击选区附近的「批注」。面板保存选中文字，编辑批注时不依赖浏览器仍保留选区。「添加到聊天」追加引用原文、可用的文件名或消息标识以及批注；可重复添加多个引用，不自动发送。Enter 换行，Ctrl/Cmd+Enter 添加，Escape 或「取消」关闭；输入法确认不会触发添加。空白批注不能添加。编辑器、输入框内的选文以及跨聊天流选文不会触发。
+
+批注面板是当前会话的临时状态，切换会话或刷新会丢弃尚未添加的批注。追加失败时保留文字并显示重试提示；已添加内容由 DSH 的草稿和正常消息发送链路持有，不建立第二份批注存储。引用是可编辑的普通引用文本，不是独立附件或可跳转引用芯片。
+
 ## 安装
 
 ```powershell
@@ -42,10 +56,15 @@ pnpm dsh plugin --profile web add github:vb2250158/dsh-chat-enhancement#<commit>
 ## 验证
 
 ```powershell
+npm run build:client
 npm test
 node --check lib/client.js
 npm pack --dry-run
 ```
+
+真实输入编辑器集成测试：设置 `DSH_SOURCE_ROOT` 为具有已构建 `ui-conversation` 的 DSH 源码目录，然后执行 `node tests/annotations-editor.integration.mjs`，验证实际引用芯片、附件保留与零自动提交。
+
+DOM 测试使用已有开发依赖：将 `DSH_TEST_DEPENDENCY_ROOT` 指向能够解析 `react`、`react-dom/client`、`jsdom` 的开发包目录，再运行 `npm test`。未设置时 DOM 测试会明确跳过，不能视为浏览器验收。构建后的 `lib/client.js` 随包发布，源码改动后必须重新构建。
 
 ## 许可证
 

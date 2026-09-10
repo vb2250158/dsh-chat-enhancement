@@ -1,6 +1,7 @@
 /** Browser entry for the chat-enhancement DSH bundle. */
 
 import * as React from 'react'
+import { AnnotationController, appendAnnotation, annotationLocales } from './annotations.js'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 
 const overlayStyle = { position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: '24px', background: 'rgb(0 0 0 / 70%)' }
@@ -66,14 +67,13 @@ function pathFromArgs(argsRaw) {
 function previewFromBlock(block) {
   if (!('kind' in block)) return null
   const image = block.content.find(part => part.type === 'image')?.attachment
-  let imagePath = null
+  if (image !== undefined) return { kind: 'image', attachment: image, path: null }
   for (const part of block.content) {
     if (part.type !== 'text') continue
     try {
       const marker = JSON.parse(part.text)
       if (marker?.type === 'dsh-chat-enhancement/image' && marker.attachment !== null && typeof marker.attachment === 'object') {
-        imagePath = typeof marker.path === 'string' ? marker.path : null
-        if (image === undefined) return { kind: 'image', attachment: marker.attachment, path: imagePath }
+        return { kind: 'image', attachment: marker.attachment, path: typeof marker.path === 'string' ? marker.path : null }
       }
       if (marker?.type === 'dsh-chat-enhancement/video' && typeof marker.token === 'string' && typeof marker.mediaType === 'string' && typeof marker.name === 'string') {
         return { kind: 'video', token: marker.token, mediaType: marker.mediaType, name: marker.name, bytes: typeof marker.bytes === 'number' ? marker.bytes : 0 }
@@ -83,7 +83,6 @@ function previewFromBlock(block) {
       }
     } catch {}
   }
-  if (image !== undefined) return { kind: 'image', attachment: image, path: imagePath }
   return null
 }
 
@@ -549,9 +548,10 @@ const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
   },
 ] }
 
-export const inject = ['slots', 'sessions', 'remote', 'settingsScope']
+export const inject = ['slots', 'sessions', 'remote', 'settingsScope', 'conversation', 'locale']
 
 export async function apply(ctx) {
+  ctx.effect(() => ctx.locale.register('chat-enhancement-annotations', annotationLocales))
   const dispose = await ctx.remote.$mount(previewRemote)
   const sessions = ctx.get('sessions')
   const mediaSettings = ctx.settingsScope.bind({ namespace: 'chat-enhancement' })
@@ -581,6 +581,10 @@ export async function apply(ctx) {
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'chat-enhancement-thinking-groups', order: 102,
   }, ThinkingGroupController))
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock', id: 'chat-enhancement-annotations', order: 103, locale: 'chat-enhancement-annotations',
+    inject: () => ({ append: (sessionId, quote, note) => appendAnnotation(sessions, ctx.conversation, sessionId, quote, note) }),
+  }, props => React.createElement(AnnotationController, { ...props, key: props.sessionId })))
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section', id: 'chat-enhancement-media', order: 65, label: () => '媒体播放',
     inject: () => ({ mediaSettings }),
