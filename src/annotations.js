@@ -15,7 +15,7 @@ export const annotationLocales = {
     changed: 'The draft or conversation changed. Your comment was not added. Return to the original conversation and try again.',
   },
 }
-const annotationPanelStyle = { position: 'fixed', zIndex: 1100, width: 'min(420px, calc(100vw - 24px))', maxHeight: 'min(70vh, 520px)', overflow: 'auto', padding: '12px', display: 'grid', gap: '12px', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '12px', background: 'var(--dsw-alias-bg-elevated)', color: 'var(--dsw-alias-label-primary)' }
+const annotationPanelStyle = { position: 'fixed', zIndex: 1100, width: 'min(420px, calc(100vw - 24px))', maxHeight: 'min(70vh, 520px)', overflow: 'auto', padding: '12px', display: 'grid', gap: '12px', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '12px', background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-primary)' }
 
 /** Convert the public clipboard projection to the input event's atomic-chip end offset. */
 export function annotationEndOffset(input) {
@@ -84,17 +84,20 @@ export function AnnotationController({ sessionId, useSessions, append, t }) {
       if (!editingRef.current && !rootRef.current?.contains(document.activeElement)) setSelection(captureAnnotationSelection(window.getSelection()))
     }
     const dismiss = event => {
-      if (!editingRef.current && !rootRef.current?.contains(event.target)) setSelection(null)
+      if (rootRef.current && !rootRef.current.contains(event.target)) {
+        close()
+        window.getSelection()?.removeAllRanges()
+      }
     }
     document.addEventListener('selectionchange', capture)
     document.addEventListener('pointerup', capture)
     document.addEventListener('keyup', capture)
-    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('pointerdown', dismiss, true)
     return () => {
       document.removeEventListener('selectionchange', capture)
       document.removeEventListener('pointerup', capture)
       document.removeEventListener('keyup', capture)
-      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('pointerdown', dismiss, true)
       editingRef.current = false
     }
   }, [current, sessionId])
@@ -131,7 +134,7 @@ export function AnnotationController({ sessionId, useSessions, append, t }) {
       selection.source && React.createElement('div', { 'data-dsh-annotation-source': '', style: { overflowWrap: 'anywhere', color: 'var(--dsw-alias-label-secondary)' } }, selection.source),
       React.createElement('blockquote', { style: { margin: 0, maxHeight: '160px', overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, selection.text),
       React.createElement('label', null, annotationCopy.note,
-        React.createElement('textarea', { value: note, rows: 3, style: { width: '100%', boxSizing: 'border-box', resize: 'vertical', color: 'inherit', background: 'var(--dsw-alias-bg-primary)', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '8px', padding: '8px', font: 'inherit' }, onChange: event => setNote(event.target.value), 'aria-label': annotationCopy.note })),
+        React.createElement('textarea', { value: note, rows: 3, style: { width: '100%', boxSizing: 'border-box', resize: 'vertical', color: 'inherit', background: 'var(--dsw-alias-bg-base)', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '8px', padding: '8px', font: 'inherit' }, onChange: event => setNote(event.target.value), 'aria-label': annotationCopy.note })),
       error && React.createElement('div', { role: 'alert' }, error),
       React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } },
         React.createElement(Button, { onClick: cancel }, annotationCopy.cancel),
