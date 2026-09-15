@@ -8,7 +8,7 @@ const root = new URL('..', import.meta.url)
 test('generated preview preserves native image priority over text media markers', async () => {
   const bundle = await readFile(new URL('./lib/client.js', root), 'utf8')
   let entry
-  vm.runInNewContext(bundle.replace('return { inject, apply, createMediaAutoplayGate }', 'return { previewFromBlock }'), {
+  vm.runInNewContext(bundle.replace('return { inject, apply, createMediaAutoplayGate, modelForMessage }', 'return { previewFromBlock }'), {
     window: { __ModuleLoader__: { load(value) { entry = value } } },
   })
   const { previewFromBlock } = entry.factory(() => ({}))
@@ -37,10 +37,25 @@ async function loadBrowserPlugin() {
   })
 }
 
+/** 加载 bundle 并暴露纯逻辑辅助函数，供不依赖 DOM 的单元测试直接调用。 */
+async function loadBrowserHelpers() {
+  const client = await readFile(new URL('./lib/client.js', root), 'utf8')
+  let loaderEntry
+  vm.runInNewContext(client, {
+    window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
+  })
+  return loaderEntry.factory((name) => {
+    if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {} }
+    throw new Error(`unexpected browser dependency: ${name}`)
+  })
+}
+
 test('declares the media bundle, browser previews, and bounded Markdown reader', async () => {
   const manifest = JSON.parse(await readFile(new URL('./package.json', root), 'utf8'))
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
-  const host = await readFile(new URL('./src/index.js', root), 'utf8')
+  // 归一化换行：断言里写的是 LF，而 checkout 可能是 CRLF（core.autocrlf）。
+  const host = (await readFile(new URL('./src/index.js', root), 'utf8')).replace(/\r\n/gu, '\n')
   const typertHost = await readFile(new URL('./src/typert.host.js', root), 'utf8')
 
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
@@ -260,4 +275,38 @@ test('autoplay gate ignores restored history and only accepts a newly settled Ag
   assert.equal(gate.observe('new-video-while-agent-runs', 1_002, true, true), true)
   assert.equal(gate.observe('new-video-while-agent-runs', 1_002, true, true), false)
   assert.equal(gate.observe('autoplay-disabled', 1_003, false, true), false)
+})
+
+test('turn model badge reads the assistant node requestConfig by message id', async () => {
+  const { modelForMessage } = await loadBrowserHelpers()
+  const nodes = [
+    { kind: 'user', messageId: 'm-user' },
+    { kind: 'assistant', messageId: 'm-1', requestConfig: { provider: 'codex', model: 'gpt-6-astra', reasoningEffort: 'medium' } },
+    { kind: 'assistant', messageId: 'm-2', requestConfig: { provider: 'deepseek', model: 'deepseek-v4' } },
+    { kind: 'assistant' },
+  ]
+  // vm 跨 realm 的对象原型不同，逐字段断言而不是 deepEqual。
+  const second = modelForMessage(nodes, 'm-2')
+  assert.equal(second.model, 'deepseek-v4')
+  assert.equal(second.provider, 'deepseek')
+  const first = modelForMessage(nodes, 'm-1')
+  assert.equal(first.model, 'gpt-6-astra')
+  assert.equal(first.provider, 'codex')
+  assert.equal(first.reasoningEffort, 'medium')
+  // 无 requestConfig 的节点、缺失的 messageId、非数组输入都退回 null，而不是抛错或渲染空壳。
+  assert.equal(modelForMessage(nodes, 'm-user'), null)
+  assert.equal(modelForMessage(nodes, 'missing'), null)
+  assert.equal(modelForMessage(undefined, 'm-1'), null)
+  assert.equal(modelForMessage([null, 42], 'm-1'), null)
+})
+
+test('turn model badge declares its slot registration and stays read-only', async () => {
+  const client = await readFile(new URL('./lib/client.js', root), 'utf8')
+  assert.match(client, /conversation\.chat\.assistant-actions/)
+  assert.match(client, /chat-enhancement-turn-model/)
+  assert.match(client, /TurnModelBadge/)
+  // 徽章不得注册进 chain 槽位：chain 是单选选举，会顶掉 ui-deliverables。
+  assert.doesNotMatch(client, /name: 'conversation\.chat\.turnTail'/)
+  assert.match(client, /useTrajectory/)
+  assert.match(client, /--dsw-alias-label-tertiary/)
 })

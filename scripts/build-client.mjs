@@ -12,6 +12,6 @@ await writeFile(new URL('lib/client.js', root), `window.__ModuleLoader__.load({
     const { MarkdownText, Button } = require('@deepseek-ai/dsh-client-ui-primitives')
 ${annotations}
 ${client}
-    return { inject, apply, createMediaAutoplayGate }
+    return { inject, apply, createMediaAutoplayGate, modelForMessage }
   },
 })\n`)
