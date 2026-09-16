@@ -96,6 +96,8 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /aria-haspopup': 'menu'/)
   assert.match(client, /audioAutoplay/)
   assert.match(client, /videoAutoplay/)
+  assert.match(client, /toolDescriptions/)
+  assert.match(client, /显示模型自述的本次调用说明/)
   assert.match(client, /MarkdownText/)
   assert.match(client, /conversation\.input\.dock/)
   assert.match(client, /ToolCallGroupController/)
@@ -139,6 +141,10 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   // 语言名只写在 languages.js；Host 入口不得再抄一份。
   assert.doesNotMatch(host, /Simplified Chinese/)
   assert.doesNotMatch(host, /## Language Preference/)
+  // 工具行自述：模型侧靠装配期注入属性，显示侧靠 patches/ 里的官方补丁。
+  assert.match(host, /toolDescriptions: z\.boolean\(\)\.default\(true\)/)
+  assert.match(host, /settingsCtx\.on\('system-prompt\/assemble'/)
+  assert.match(host, /return describeTools\(assembly, toolDescriptionHint\(current\.language\)\)/)
   assert.ok(host.indexOf('const ChatMediaService = createMediaService') < host.indexOf("ctx.inject(['agents']"))
   assert.ok(host.indexOf('const ChatMarkdownService = createMarkdownService') < host.indexOf("ctx.inject(['agents']"))
   assert.match(host, /ctx\.inject\(\['agents'\], \(\) => \{\n    new ChatMediaService\(ctx\)\n    new ChatMarkdownService\(ctx\)/)
@@ -322,6 +328,44 @@ test('turn model badge reads the assistant node requestConfig by message id', as
   assert.equal(modelForMessage(nodes, 'missing'), null)
   assert.equal(modelForMessage(undefined, 'm-1'), null)
   assert.equal(modelForMessage([null, 42], 'm-1'), null)
+})
+
+test('every assembled tool schema advertises the optional description property', async () => {
+  const { describeTools } = await import(new URL('./lib/index.js', root))
+  const hint = '一句话说明本次调用要做什么'
+  const assembly = {
+    sections: [{ name: 'a', text: 'x' }],
+    contexts: [],
+    variables: { v: '1' },
+    tools: [
+      { name: 'edit', description: 'Edit a file', parameters: { type: 'object', required: ['file_path'], properties: { file_path: { type: 'string' } } } },
+      { name: 'bash', description: 'Run a command', parameters: { type: 'object', properties: { command: { type: 'string' }, description: { type: 'string' } } } },
+      { name: 'weird', description: 'No parameters', parameters: null },
+    ],
+  }
+  const next = describeTools(assembly, hint)
+  const edit = next.tools.find(tool => tool.name === 'edit')
+  // 属性必须排在最前：客户端对未知工具的摘要回退是按位置取「第一个字符串参数」。
+  assert.deepEqual(Object.keys(edit.parameters.properties), ['description', 'file_path'])
+  assert.deepEqual(edit.parameters.properties.description, { type: 'string', description: hint })
+  // 原有参数与 required 不受影响。
+  assert.deepEqual(edit.parameters.required, ['file_path'])
+  // 自己声明了 description 的工具保持原对象（bash 的措辞比通用提示具体）。
+  assert.equal(next.tools.find(tool => tool.name === 'bash'), assembly.tools[1])
+  // 参数不是对象就跳过，不能抛。
+  assert.equal(next.tools.find(tool => tool.name === 'weird'), assembly.tools[2])
+  // 其它字段原样带过，且不修改传入的装配对象。
+  assert.deepEqual(next.sections, assembly.sections)
+  assert.deepEqual(next.variables, assembly.variables)
+  assert.equal(Object.hasOwn(assembly.tools[0].parameters.properties, 'description'), false)
+})
+
+test('describeTools returns the identical assembly when nothing needs adding', async () => {
+  const { describeTools } = await import(new URL('./lib/index.js', root))
+  const declared = { sections: [], contexts: [], variables: {}, tools: [{ name: 'bash', parameters: { properties: { description: { type: 'string' } } } }] }
+  assert.equal(describeTools(declared, 'hint'), declared)
+  const empty = { sections: [], contexts: [], variables: {}, tools: [] }
+  assert.equal(describeTools(empty, 'hint'), empty)
 })
 
 test('turn model badge declares its slot registration and stays read-only', async () => {

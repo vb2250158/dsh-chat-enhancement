@@ -4,6 +4,14 @@
 
 ## 更新日志
 
+### 0.3.31
+
+- 新增「对话增强 → 工具行」开关：给每个工具声明一个可选的 `description` 参数，模型用一句话说明本次调用要做什么，工具行就显示这句话（bash 一直是这样显示的）。默认打开。
+- 模型那一半完全由插件完成：在 `system-prompt/assemble` 瀑布里把该属性注入**装配后**的工具 schema，不碰任何官方工具定义。执行侧安全——`parameterSchemaSpecToJsonSchema` 的参数根对象不写 `additionalProperties`，JSON Schema 视为开放，各工具自己的解析只取认识的键，所以带上 description 的调用与不带的行为完全一致。属性排在最前，因为客户端对未知工具的摘要回退是按位置取「第一个字符串参数」。
+- **显示那一半需要官方补丁**：`patches/2026-09-16-tool-row-description.patch`（4 个文件，基线 commit `c291e7961a`）。内容是 `SUMMARY_KEYS` 各 variant 前置 `description`，以及 `ToolRow` 把「描述」与「可点击的文件路径」拆成两个元素——原先行的折叠行只有一个文本槽，文件行里它就是那个可点开的路径标签。官方 `packages/client/ui-tool` 的 307 项测试在打补丁后全过。
+- 补丁**不参与任何安装流程**：它与 pin/Import 无关，要按下面「官方补丁」一节手工 apply 并重建客户端产物；`lib/` 被官方 gitignore，所以每台机器都得自己构建。
+- 未打补丁时模型仍会填写 description，只是界面上看不到（设置页那段说明已经写明），所以开关打开不会造成错误显示。
+
 ### 0.3.30
 
 - 修复「选了简体中文、思考仍然是英文」：原先的指令整段是英文写的（`Write everything you say to the user in Simplified Chinese`），而模型看到的是满屏英文指令加英文工具输出，于是思考语言跟着上下文走。现在每个语言都自带**用该语言书写的祈使句**（`native` 字段），排在分区第一行，指令本身就是目标语言。
@@ -64,6 +72,7 @@
 - `show_audio` 使用相同的会话绑定读取协议展示 MP3、WAV、M4A、AAC、OGG、Opus 和 FLAC；聊天端使用原生音频控件播放。
 - 设置 → 对话增强 → 媒体展示提供“Agent 展示音频/视频时自动播放”开关，写入 DSH Host 设置并在所有会话和浏览器间共享；默认均关闭。开启后，只在当前聊天已经打开、Agent 新完成 `show_audio` / `show_video` 调用时尝试播放，进入聊天、切换聊天或恢复历史消息不会播放；浏览器仍可能按自身策略阻止未交互页面的有声自动播放。
 - 设置 → 对话增强 → “思考与回复语言”下拉：选定语言后，Host 向系统提示注入一段语言分区（排在提示词末尾附近），约束模型的思考与可见回复语言；默认“跟随对话”不注入任何内容。分区第一行用目标语言书写，因此指令语言本身与要求一致。这是模型语言偏好，与“通用设置”里的界面语言互不影响。改动从下一个模型步骤起生效，无需重开会话或重启；代码、路径、命令、日志与引文原文始终保留原样。极少数对语言指令遵循很弱的模型可能仍用英文思考，那属于模型行为而非设置未生效。
+- 设置 → 对话增强 → 工具行 → “显示模型自述的本次调用说明”：给每个工具声明可选 `description` 参数，模型用一句话说明本次调用要做什么，工具行显示这句话。默认打开。显示效果需要仓库 `patches/` 里的官方补丁（见「官方补丁」一节）；未打补丁时模型仍会填写，界面只显示原来的路径或参数。
 - 三个展示工具均声明显式对象根 JSON Schema，兼容要求标准工具参数结构的模型提供商。
 - 聊天内的 `.md` / `.markdown` 文件芯片（包括已生成文件和文件引用）点击后显示页内 Markdown 预览，不再交给本机默认应用。
 - 连续三项及以上工具调用和上下文注入默认折叠为一行执行摘要；只收起较早记录，最新一项无论运行中或已完成都保留在摘要后面，下一项出现后才并入摘要。展开后保留 DSH 原有工具卡片、参数、输出、媒体预览和子调用，不替换官方工具渲染器。
@@ -76,6 +85,50 @@
 - 不读取 `file://`，不直接访问本机或 NAS 路径，不保存文件内容或个人配置。
 
 音频和视频缓存仅在 DSH 运行期间有效，且默认单文件上限均为 50 MiB。Markdown 默认读取上限为 2 MiB。可通过该插件的 `maxAudioBytes`、`maxVideoBytes`、`maxMarkdownBytes` 配置调整；不要把本机路径、NAS 路径或凭据写入共享配置。插件通过 `./typert` 为媒体和 Markdown 读取导出严格的 Host Remote 描述，预览服务在根 Host 上下文完成注册；已存在和后续打开的会话均通过相同的 Host 端点读取预览数据。PDF 仍需要独立的受管读取协议。
+
+## 官方补丁（工具行自述）
+
+`patches/` 目录里的补丁改的是 **DeepSeek Harness 官方源码**，不是本插件的一部分。它们与本插件的
+pin / Import 完全无关，必须手工应用并在该机器上重建客户端产物 —— 官方把 `lib/` 列进了
+`.gitignore`，**补丁不含构建产物**。
+
+补丁说明：
+
+| 补丁 | 基线 | 内容 |
+| --- | --- | --- |
+| `2026-09-16-tool-row-description.patch` | `c291e7961a`（4 个文件） | 工具行显示模型自述：`tool-call-model.ts` 的 `SUMMARY_KEYS` 各 variant 前置 `description` 并新增 `ToolRowModel.summaryIsDescription`；`ToolRow.tsx` 在描述存在时把描述与可点击路径拆成两个元素；`file-mutation-row.tsx` / `read-family-row.tsx` 传入该标记。配套模型侧由插件 `toolDescriptions` 开关完成，补丁只负责显示。 |
+
+应用与重建（`$HARNESS` 指本机 harness 检出，**不要写死路径**）：
+
+```bash
+cd "$HARNESS"
+git apply --check "<插件仓库>/patches/2026-09-16-tool-row-description.patch"   # 先 check，不落盘
+git apply        "<插件仓库>/patches/2026-09-16-tool-row-description.patch"
+
+# 只重建 ui-tool 一个包，避免碰其它包（官方规定的完整顺序见下）
+node ./node_modules/typescript/bin/tsc -b packages/client/ui-tool/tsconfig.json
+cd packages/client/ui-tool && node ../../../node_modules/tsdown/dist/run.mjs --env.DSH_BUILD_FACE client
+```
+
+客户端产物是**按请求读盘**的，所以重建后刷新浏览器即可，**不需要重启宿主**；宿主侧的变化（插件
+`toolDescriptions`）才需要重启。验证：`packages/client/ui-tool/lib/client.js` 里应能搜到
+`summaryIsDescription`（局部变量会被 minify 改名，所以用这个**属性名/字符串**当探针，别用变量名）。
+
+官方规定的完整构建顺序（改到别的 client 包时用这条）：
+
+```
+tsc -b tsconfig.host.json → tsdown --env.DSH_BUILD_FACE host
+  → tsc -b tsconfig.client.json → tsdown --env.DSH_BUILD_FACE client
+```
+
+**注意**：`tsc -b packages/client/ui-tool/tsconfig.json` 的 emit 才是 tsdown 的入口
+（`DSH_BUILD_FACE=client` 时客户端 bundle 的 entry 是 `lib/types/client/index.js`），所以漏了
+tsc 这一步，tsdown 打出来的还是旧代码。另外 `tsc -b` 会连带重建 ui-tool 引用到的项目，本机
+`packages/client/ui-conversation` 有一处既有的类型错误会让它 exit 2 —— 但 ui-tool 自己的 emit 仍然
+完成，检查 `lib/types/.../tool-call-model.js` 里有新代码即可。
+
+**上游更新后要重放**：先 `git pull` 再 `git apply`（顺序反了会被 pull 覆盖）。`--check` 失败时用
+`git apply --3way` 或 `--reject` 处理冲突，然后重新走一遍重建与验证。
 
 ## 选区批注
 

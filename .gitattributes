@@ -1,0 +1,4 @@
+# Patch files must reach every checkout byte-identical to the diff they were
+# cut from: a working copy that rewrites their line endings makes `git apply`
+# fail on the very machines this file is meant to serve.
+patches/*.patch -text

@@ -229,7 +229,78 @@ function profileProtocol() {
 }
 
 /**
- * Register the plugin's settings namespace and the model-language prompt section.
+ * Per-language wording for the injected `description` property.
+ *
+ * The hint is a schema annotation the model reads on every call, so it is
+ * written in the language the deployment already asked the model to answer in
+ * — the same reasoning as the language section.
+ */
+const TOOL_DESCRIPTION_HINTS = {
+  zh: '一句话说明本次调用要做什么（动宾短语，5~15 字，例如「补充 skill 目录约定」）。显示在对话界面的工具行上，不参与执行。',
+  en: 'One short sentence (5-15 words, active voice) naming what this call does, e.g. "Add the skill directory convention". Shown on the tool row in the UI; not used during execution.',
+}
+
+/** Languages whose hint is written in Chinese; `auto` and the rest take English. */
+const CHINESE_LANGUAGES = new Set(['zh-CN', 'zh-TW'])
+
+/**
+ * Resolve the hint for one stored language id.
+ * @param language - the persisted language id.
+ * @returns the hint text in that language, or English for `auto` and unknowns.
+ */
+function toolDescriptionHint(language) {
+  return CHINESE_LANGUAGES.has(language) ? TOOL_DESCRIPTION_HINTS.zh : TOOL_DESCRIPTION_HINTS.en
+}
+
+/**
+ * Advertise an optional `description` on every assembled tool schema.
+ *
+ * A tool row's summary is the call's `description` argument whenever the call
+ * carries one — bash has declared that parameter from the beginning, which is
+ * why its rows have always read as a sentence. Every other tool cannot produce
+ * one, because its schema never offered it; adding the property to the
+ * assembled schemas is what makes the model write it.
+ *
+ * Injecting into the assembly rather than into each official tool definition
+ * keeps this half plugin-only, and the copy stays shallow: a tool that already
+ * declares `description` (bash and the PowerShell twin) keeps its own wording
+ * and the hint is spent nowhere.
+ *
+ * Execution tolerates the extra key. `parameterSchemaSpecToJsonSchema` leaves
+ * the parameter root without `additionalProperties`, which JSON Schema reads as
+ * open, and each tool's own parser picks only the keys it knows — so a call
+ * carrying a description behaves exactly like one without it.
+ *
+ * The property leads the map because the client's summary fallbacks are
+ * positional (`deriveSummary` takes the first string argument for an unknown
+ * tool), and models tend to emit arguments in schema order.
+ * @param assembly - the assembly returned by the rest of the waterfall.
+ * @param hint - the property annotation for the deployment's language.
+ * @returns the same assembly when every tool already declares one, otherwise a copy with the property added.
+ */
+export function describeTools(assembly, hint) {
+  let changed = false
+  const tools = assembly.tools.map((tool) => {
+    const parameters = tool.parameters
+    if (parameters === null || typeof parameters !== 'object' || Array.isArray(parameters)) return tool
+    const properties = parameters.properties
+    if (properties === null || typeof properties !== 'object' || Array.isArray(properties)) return tool
+    if (Object.hasOwn(properties, 'description')) return tool
+    changed = true
+    return {
+      ...tool,
+      parameters: {
+        ...parameters,
+        properties: { description: { type: 'string', description: hint }, ...properties },
+      },
+    }
+  })
+  return changed ? { ...assembly, tools } : assembly
+}
+
+/**
+ * Register the plugin's settings namespace, the model-language prompt section,
+ * and the per-call tool description property.
  *
  * The section text is a provider rather than a constant, so assembly reads the
  * resolved setting on every model step: switching the language reaches the very
@@ -244,11 +315,18 @@ function registerSettings(ctx) {
       audioAutoplay: z.boolean().default(false),
       videoAutoplay: z.boolean().default(false),
       language: z.string().default(AUTO_LANGUAGE),
+      toolDescriptions: z.boolean().default(true),
     }))
     settingsCtx.systemPrompt.section({
       name: 'private:chat-enhancement-language',
       order: LANGUAGE_SECTION_ORDER,
       text: () => languageInstruction(settings.get().language),
+    })
+    settingsCtx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+      const assembly = await next()
+      const current = settings.get()
+      if (current.toolDescriptions === false) return assembly
+      return describeTools(assembly, toolDescriptionHint(current.language))
     })
   })
 }

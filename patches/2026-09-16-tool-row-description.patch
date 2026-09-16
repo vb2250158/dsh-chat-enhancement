@@ -1,0 +1,174 @@
+diff --git a/packages/client/ui-tool/src/client/tool/components/ToolRow.tsx b/packages/client/ui-tool/src/client/tool/components/ToolRow.tsx
+index ca5becec3b..01d6e9ec4a 100644
+--- a/packages/client/ui-tool/src/client/tool/components/ToolRow.tsx
++++ b/packages/client/ui-tool/src/client/tool/components/ToolRow.tsx
+@@ -33,6 +33,14 @@ export interface ToolRowProps {
+   icon: ReactNode
+   title: string
+   summary: string
++  /**
++   * Whether `summary` is the model's own `description` argument rather than the
++   * call's operands. A file-tool row turns its summary into the openable path
++   * label, so the two must be drawn separately once a description is present:
++   * the description as text, the path as the link. Absent = the summary is the
++   * single collapsed label (unchanged behavior).
++   */
++  summaryIsDescription?: boolean | undefined
+   /**
+    * Trailing summary fragment rendered outside the ellipsized summary text, so
+    * a narrow row clips the summary before this. For a fragment whose whole
+@@ -115,6 +123,7 @@ export function ToolRow({
+   icon,
+   title,
+   summary,
++  summaryIsDescription,
+   summarySuffix,
+   bodyRaw,
+   output,
+@@ -173,6 +182,9 @@ export function ToolRow({
+   }, [diffBody])
+   const suffix = failureLine === null ? summarySuffix ?? diffStat : null
+   const fileLink = filePath !== undefined && onOpenFile !== undefined && failureLine === null
++  // A described row splits the two meanings the file link used to carry at
++  // once: the sentence the model wrote, then the path it acts on.
++  const described = summaryIsDescription === true && failureLine === null
+   const toggleExpand = () => {
+     setExpanded(v => !v)
+   }
+@@ -213,14 +225,19 @@ export function ToolRow({
+           <>
+             <span className={css.sep} aria-hidden />
+             {fileLink ? (
+-              <button
+-                type="button"
+-                className={css.fileLink}
+-                onClick={openFile}
+-                onKeyDown={fileLinkKeyDown}
+-              >
+-                {summaryText}
+-              </button>
++              <>
++                {described && (
++                  <span className={css.summary}>{summaryText}</span>
++                )}
++                <button
++                  type="button"
++                  className={css.fileLink}
++                  onClick={openFile}
++                  onKeyDown={fileLinkKeyDown}
++                >
++                  {described ? filePath ?? summaryText : summaryText}
++                </button>
++              </>
+             ) : (
+               <span
+                 className={clsx(css.summary, failureLine !== null && css.errorSummary)}
+diff --git a/packages/client/ui-tool/src/client/tool/models/tool-call-model.ts b/packages/client/ui-tool/src/client/tool/models/tool-call-model.ts
+index ccea766eea..0c1708c333 100644
+--- a/packages/client/ui-tool/src/client/tool/models/tool-call-model.ts
++++ b/packages/client/ui-tool/src/client/tool/models/tool-call-model.ts
+@@ -92,6 +92,16 @@ export interface ToolRowModel {
+   variant: ToolRowVariant
+   titleKey: ToolTitleKey
+   summary: string
++  /**
++   * Whether {@link ToolRowModel.summary} is the model's own `description`
++   * argument rather than a value derived from the call's operands.
++   *
++   * A file-tool row renders its path as the openable summary text. Once a
++   * description leads the summary the two must be drawn separately — the
++   * description as text, the path as the link — and only this flag tells the
++   * row which of the two it is holding.
++   */
++  summaryIsDescription: boolean
+   /**
+    * Filesystem path from args (`path` / `file_path`) when the row is a file
+    * tool; absent for URL reads and non-file tools. The chat view resolves
+@@ -148,17 +158,41 @@ function pickString(args: Record<string, unknown>, keys: readonly string[]): str
+   return undefined
+ }
+ 
+-/** Summary key preference per variant (args-derived; result-derived summaries are a ledger item). */
++/**
++ * Summary key preference per variant (args-derived; result-derived summaries are a ledger item).
++ *
++ * `description` leads every variant: a tool call may carry one short sentence
++ * naming what it does, and when it does that sentence IS the row's summary —
++ * it is what the model meant the user to read. The variant's own keys remain
++ * the fallback, so a call without a description renders exactly as before.
++ */
+ const SUMMARY_KEYS: Record<ToolRowVariant, readonly string[]> = {
+   bash: ['description', 'command'],
+-  read: ['path', 'file_path', 'url'],
+-  search: ['query', 'pattern', 'url'],
+-  write: ['path', 'file_path'],
+-  edit: ['path', 'file_path'],
++  read: ['description', 'path', 'file_path', 'url'],
++  search: ['description', 'query', 'pattern', 'url'],
++  write: ['description', 'path', 'file_path'],
++  edit: ['description', 'path', 'file_path'],
+   code: ['description'],
+-  others: [],
++  others: ['description'],
+ }
+ 
++/**
++ * Whether the call carries a non-empty `description` argument.
++ *
++ * Every variant leads with `description` in {@link SUMMARY_KEYS}, so this is
++ * exactly the condition under which {@link deriveSummary} returned it rather
++ * than a value derived from the call's operands. The key is an optional
++ * property the wire schema advertises; a tool that declares its own (bash, and
++ * any tool a plugin augments) lands here too.
++ * @param argsRaw - original argument JSON or incomplete raw text.
++ * @returns true when a usable description is present.
++ */
++function hasDescription(argsRaw: string): boolean {
++  const parsed = parseArgs(argsRaw)
++  if (typeof parsed !== 'object' || parsed === null) return false
++  const value = (parsed as Record<string, unknown>).description
++  return typeof value === 'string' && value.trim() !== ''
++}
+ 
+ function deriveSummary(variant: ToolRowVariant, argsRaw: string): string {
+   const parsed = parseArgs(argsRaw)
+@@ -178,7 +212,6 @@ function deriveSummary(variant: ToolRowVariant, argsRaw: string): string {
+ 
+ /** Path keys only — never `url` (web_fetch lands on the read variant). */
+ const FILE_PATH_KEYS = ['path', 'file_path'] as const
+-
+ /** File-tool variants whose summary may be an openable workspace path. */
+ const FILE_PATH_VARIANTS: ReadonlySet<ToolRowVariant> = new Set(['read', 'write', 'edit'])
+ 
+@@ -243,6 +276,7 @@ export function toolRowModel(toolName: string, block: ToolCallBlock, cwd?: strin
+     variant,
+     titleKey: toolTitleKey ?? VARIANT_TITLE_KEYS[variant],
+     summary,
++    summaryIsDescription: hasDescription(argsRaw),
+     filePath: deriveFilePath(variant, argsRaw),
+     bodyRaw,
+     output,
+diff --git a/packages/client/ui-tool/src/client/tool/toolviews/file-mutation-row.tsx b/packages/client/ui-tool/src/client/tool/toolviews/file-mutation-row.tsx
+index dafc8c0697..9a0d01fb18 100644
+--- a/packages/client/ui-tool/src/client/tool/toolviews/file-mutation-row.tsx
++++ b/packages/client/ui-tool/src/client/tool/toolviews/file-mutation-row.tsx
+@@ -23,6 +23,7 @@ export function FileMutationRow({ toolName, block, cwd, home, openFile, inspect,
+       icon={<IconEditOutline16 size={14} />}
+       title={t(model.titleKey)}
+       summary={model.summary}
++      summaryIsDescription={model.summaryIsDescription}
+       output={model.output}
+       errorSummary={model.errorSummary}
+       diff={diff}
+diff --git a/packages/client/ui-tool/src/client/tool/toolviews/read-family-row.tsx b/packages/client/ui-tool/src/client/tool/toolviews/read-family-row.tsx
+index 40553313d2..f0b6c9e10a 100644
+--- a/packages/client/ui-tool/src/client/tool/toolviews/read-family-row.tsx
++++ b/packages/client/ui-tool/src/client/tool/toolviews/read-family-row.tsx
+@@ -47,6 +47,7 @@ export function readFamilyRow(
+       icon={<IconBrowseOutline16 size={14} />}
+       title={t(model.titleKey)}
+       summary={model.summary}
++      summaryIsDescription={model.summaryIsDescription}
+       bodyRaw={null}
+       output={model.output}
+       errorSummary={model.errorSummary}
