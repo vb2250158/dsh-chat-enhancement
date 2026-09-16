@@ -20,7 +20,7 @@ test('DOM selection, saved quote, IME, cancellation, retry and session isolation
   const { document, Event, MouseEvent, KeyboardEvent } = dom.window
   const act = React.act
   const context = { React, Button: ({ variant, ...props }) => React.createElement('button', props), window: dom.window, document }
-  const source = (await readFile(new URL('../src/annotations.js', import.meta.url), 'utf8')).replace(/^import .*\n/gmu, '').replace(/^export /gmu, '')
+  const source = (await readFile(new URL('../src/annotations.js', import.meta.url), 'utf8')).replace(/^import .*\r?\n/gmu, '').replace(/^export /gmu, '')
   const { AnnotationController, captureAnnotationSelection } = vm.runInNewContext(`${source}\n;({AnnotationController,captureAnnotationSelection})`, context)
   const root = createRoot(document.getElementById('app'))
   let current = 'one'

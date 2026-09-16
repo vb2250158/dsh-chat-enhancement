@@ -4,7 +4,7 @@ import test from 'node:test'
 import vm from 'node:vm'
 
 const source = await readFile(new URL('../src/annotations.js', import.meta.url), 'utf8')
-const code = source.replace(/^import .*\n/gmu, '').replace(/^export /gmu, '')
+const code = source.replace(/^import .*\r?\n/gmu, '').replace(/^export /gmu, '')
 const api = vm.runInNewContext(`${code}\n;({ appendAnnotation, annotationEndOffset, captureAnnotationSelection })`, {})
 
 function fixture(input, applied = true) {

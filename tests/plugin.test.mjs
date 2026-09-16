@@ -83,7 +83,10 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /followingLatest/)
   assert.match(client, /imageGallery\(sessionId\)\.at\(-1\)/)
   assert.match(client, /settingsScope/)
-  assert.match(client, /chat-enhancement-media/)
+  // 本插件只占一个设置导航项：id `chat-enhancement`，标签「对话增强」。
+  assert.match(client, /id: 'chat-enhancement', order: 65, label: \(\) => '对话增强'/)
+  assert.match(client, /ChatEnhancementSettingsSection/)
+  assert.match(client, /chatSettings\.set\('language', event\.target\.value\)/)
   assert.match(client, /audioAutoplay/)
   assert.match(client, /videoAutoplay/)
   assert.match(client, /MarkdownText/)
@@ -114,9 +117,17 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(host, /chatMarkdown/)
   assert.match(host, /ctx\.fs\.contains/)
   assert.match(host, /maxMarkdownBytes/)
-  assert.match(host, /settingsCtx\.settings\.register\(MEDIA_SETTINGS_NAMESPACE/)
+  assert.match(host, /settingsCtx\.settings\.register\(CHAT_ENHANCEMENT_SETTINGS_NAMESPACE/)
   assert.match(host, /audioAutoplay: z\.boolean\(\)\.default\(false\)/)
   assert.match(host, /videoAutoplay: z\.boolean\(\)\.default\(false\)/)
+  assert.match(host, /language: z\.string\(\)\.default\(AUTO_LANGUAGE\)/)
+  assert.match(host, /import \{ AUTO_LANGUAGE, languageInstruction \} from '\.\/languages\.js'/)
+  // 语言分区必须读求值函数而不是常量，否则改设置要重启才生效。
+  assert.match(host, /name: 'private:chat-enhancement-language'/)
+  assert.match(host, /text: \(\) => languageInstruction\(settings\.get\(\)\.language\)/)
+  // 语言名只写在 languages.js；Host 入口不得再抄一份。
+  assert.doesNotMatch(host, /Simplified Chinese/)
+  assert.doesNotMatch(host, /## Language Preference/)
   assert.ok(host.indexOf('const ChatMediaService = createMediaService') < host.indexOf("ctx.inject(['agents']"))
   assert.ok(host.indexOf('const ChatMarkdownService = createMarkdownService') < host.indexOf("ctx.inject(['agents']"))
   assert.match(host, /ctx\.inject\(\['agents'\], \(\) => \{\n    new ChatMediaService\(ctx\)\n    new ChatMarkdownService\(ctx\)/)
@@ -253,10 +264,12 @@ test('client groups original tool and context rows without replacing the tool-ca
   assert.equal(thinkingController.component.name, 'ThinkingGroupController')
   const audioView = registrations.find(({ options }) => options.key === 'show_audio')
   assert.equal(audioView.options.name, 'tool.call.toolview')
-  const mediaSettings = registrations.find(({ options }) => options.id === 'chat-enhancement-media')
-  assert.equal(mediaSettings.options.name, 'settings.section')
-  assert.equal(mediaSettings.options.label(), '媒体播放')
-  assert.equal(mediaSettings.component.name, 'MediaSettingsSection')
+  // 本插件在设置菜单里只注册一个分区：全部偏好都装在「对话增强」里面。
+  const sections = registrations.filter(({ options }) => options.name === 'settings.section')
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].options.id, 'chat-enhancement')
+  assert.equal(sections[0].options.label(), '对话增强')
+  assert.equal(sections[0].component.name, 'ChatEnhancementSettingsSection')
 })
 
 test('autoplay gate ignores restored history and only accepts a newly settled Agent display', async () => {
@@ -309,4 +322,44 @@ test('turn model badge declares its slot registration and stays read-only', asyn
   assert.doesNotMatch(client, /name: 'conversation\.chat\.turnTail'/)
   assert.match(client, /useTrajectory/)
   assert.match(client, /--dsw-alias-label-tertiary/)
+})
+
+test('the language catalog is the single source for both bundle halves', async () => {
+  const { LANGUAGES, AUTO_LANGUAGE, languageEntry, languageInstruction } = await import(new URL('./src/languages.js', root))
+  const client = await readFile(new URL('./lib/client.js', root), 'utf8')
+  const host = (await readFile(new URL('./src/index.js', root), 'utf8')).replace(/\r\n/gu, '\n')
+
+  assert.equal(AUTO_LANGUAGE, 'auto')
+  assert.equal(LANGUAGES[0].id, AUTO_LANGUAGE)
+  assert.equal(new Set(LANGUAGES.map(language => language.id)).size, LANGUAGES.length)
+  assert.ok(LANGUAGES.length >= 20)
+  // 浏览器下拉和 Host 指令来自同一份目录：目录只声明一次，且每个选项文案都进了产物。
+  assert.equal(client.match(/const LANGUAGES = \[/gu)?.length, 1)
+  for (const language of LANGUAGES) {
+    assert.ok(client.includes(language.label), `the bundle is missing the ${language.id} option`)
+  }
+  assert.match(client, /## Language Preference/)
+})
+
+test('only a concrete language contributes a prompt section', async () => {
+  const { AUTO_LANGUAGE, languageEntry, languageInstruction } = await import(new URL('./src/languages.js', root))
+
+  // 「跟随对话」和本版本不认识的 id 都必须返回空文本：renderPrompt 会丢弃零长度分区，
+  // 未配置该偏好的部署因此装配出与升级前完全相同的系统提示。
+  assert.equal(languageInstruction(AUTO_LANGUAGE), '')
+  assert.equal(languageInstruction('kl-GL'), '')
+  assert.equal(languageInstruction(undefined), '')
+  assert.equal(languageEntry('kl-GL').id, AUTO_LANGUAGE)
+  assert.equal(languageEntry(undefined).id, AUTO_LANGUAGE)
+  assert.equal(languageEntry('ja').label, '日本語')
+
+  const chinese = languageInstruction('zh-CN')
+  // 语言必须以明确名称加点名母语写法出现，模型才知道要产出哪一种。
+  assert.match(chinese, /Simplified Chinese \(简体中文\)/)
+  // 同时约束可见回复与思考，并禁止翻译代码、路径、命令、日志与引文原文。
+  assert.match(chinese, /Write everything you say to the user in Simplified Chinese/)
+  assert.match(chinese, /Reason in Simplified Chinese/)
+  assert.match(chinese, /Never translate code, identifiers, file paths, shell commands, log output, error text, or quoted source/)
+  assert.notEqual(languageInstruction('en'), languageInstruction('ja'))
+  assert.match(languageInstruction('ar'), /Arabic \(العربية\)/)
 })

@@ -2,6 +2,7 @@
 
 import * as React from 'react'
 import { AnnotationController, appendAnnotation, annotationLocales } from './annotations.js'
+import { AUTO_LANGUAGE, LANGUAGES } from './languages.js'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 
 const overlayStyle = { position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: '24px', background: 'rgb(0 0 0 / 70%)' }
@@ -21,6 +22,8 @@ const imageResizeHandleStyle = { position: 'absolute', right: 0, bottom: 0, left
 const imageResizeLineStyle = { width: '72px', height: '3px', borderRadius: '999px', background: 'rgb(255 255 255 / 52%)' }
 const settingsSectionStyle = { display: 'grid', gap: '18px', minWidth: 0 }
 const settingsRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '20px', padding: '14px 0', borderBottom: '1px solid var(--dsw-alias-line-primary)' }
+const settingsGroupStyle = { margin: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: '13px', fontWeight: 500 }
+const languageSelectStyle = { minWidth: '190px', padding: '6px 10px', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '8px', background: 'var(--dsw-alias-bg-elevated)', color: 'var(--dsw-alias-label-primary)', font: 'inherit', cursor: 'pointer' }
 const turnModelStyle = { display: 'inline-flex', alignItems: 'center', maxWidth: 'min(240px, 40vw)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--dsw-alias-label-tertiary)', fontSize: '12px', lineHeight: 1.4 }
 
 /** Track media results observed by one mounted chat so history hydration cannot request playback. */
@@ -284,21 +287,52 @@ function useSettingsSnapshot(scope) {
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-function mediaPreferences(snapshot) {
-  return snapshot.status === 'ready' && snapshot.value !== undefined ? snapshot.value : { audioAutoplay: false, videoAutoplay: false }
+/**
+ * Schema defaults, repeated so a section renders before the settings transport
+ * answers and after it fails. Kept in step with the Host schema by the tests.
+ */
+const SETTINGS_DEFAULTS = { audioAutoplay: false, videoAutoplay: false, language: AUTO_LANGUAGE }
+
+/** Resolve one settings snapshot to a complete preference object. */
+function settingsPreferences(snapshot) {
+  const value = snapshot.status === 'ready' ? snapshot.value : undefined
+  return value === null || typeof value !== 'object' ? SETTINGS_DEFAULTS : { ...SETTINGS_DEFAULTS, ...value }
 }
 
-function MediaSettingsSection({ mediaSettings }) {
-  const snapshot = useSettingsSnapshot(mediaSettings)
-  const preferences = mediaPreferences(snapshot)
+/**
+ * The plugin's single settings page — one nav entry, every preference inside.
+ *
+ * The language row is Host-backed and feeds a system-prompt section, so it
+ * survives a reload and applies to every session on this machine rather than
+ * only the open tab. It is deliberately separate from the General section's
+ * Language row, which switches interface copy.
+ */
+function ChatEnhancementSettingsSection({ chatSettings }) {
+  const snapshot = useSettingsSnapshot(chatSettings)
+  const preferences = settingsPreferences(snapshot)
   const writable = snapshot.status === 'ready' && snapshot.writable
-  const row = (field, label) => React.createElement('label', { style: settingsRowStyle },
+  // An id this build no longer knows (a hand-edited document, or a language
+  // removed by a downgrade) must not blank the select: show `auto`, the value
+  // the Host resolves it to anyway.
+  const selected = LANGUAGES.some(language => language.id === preferences.language) ? preferences.language : AUTO_LANGUAGE
+  const toggle = (field, label) => React.createElement('label', { style: settingsRowStyle },
     React.createElement('span', null, label),
-    React.createElement('input', { type: 'checkbox', role: 'switch', checked: preferences[field], disabled: !writable, onChange: event => { void mediaSettings.set(field, event.target.checked) } }))
+    React.createElement('input', { type: 'checkbox', role: 'switch', checked: preferences[field], disabled: !writable, onChange: event => { void chatSettings.set(field, event.target.checked) } }))
   return React.createElement('section', { style: settingsSectionStyle },
-    React.createElement('h2', null, '媒体播放'),
-    row('audioAutoplay', 'Agent 展示音频时自动播放'),
-    row('videoAutoplay', 'Agent 展示视频时自动播放'),
+    React.createElement('h2', null, '对话增强'),
+    React.createElement('label', { style: settingsRowStyle },
+      React.createElement('span', null, '思考与回复语言'),
+      React.createElement('select', {
+        'aria-label': '思考与回复语言',
+        style: languageSelectStyle,
+        value: selected,
+        disabled: !writable,
+        onChange: event => { void chatSettings.set('language', event.target.value) },
+      }, LANGUAGES.map(language => React.createElement('option', { key: language.id, value: language.id }, language.label)))),
+    React.createElement('p', { style: mutedStyle }, '约束模型思考与回复使用的语言，与「通用设置」里的界面语言互不影响。选择「跟随对话」时不注入任何额外约束。改动从下一个模型步骤起生效，不必重开会话或重启 DSH；代码、路径、命令、日志与引文原文始终保留原样，不翻译。需要在某一轮临时改用别的语言，直接在对话里说即可。'),
+    React.createElement('h3', { style: settingsGroupStyle }, '媒体展示'),
+    toggle('audioAutoplay', 'Agent 展示音频时自动播放'),
+    toggle('videoAutoplay', 'Agent 展示视频时自动播放'),
     React.createElement('p', { style: mutedStyle }, '只在当前聊天已打开后，Agent 新完成展示调用时尝试播放；进入聊天或恢复历史消息不会播放。浏览器仍可能阻止未交互页面的有声自动播放。'))
 }
 
@@ -336,9 +370,9 @@ function MarkdownPreviewController({ sessionId, readMarkdown }) {
   )
 }
 
-function MediaToolView({ block, callId, sessionId, useSession, sessions, readMedia, mediaSettings }) {
+function MediaToolView({ block, callId, sessionId, useSession, sessions, readMedia, chatSettings }) {
   const preview = previewFromBlock(block)
-  const preferences = mediaPreferences(useSettingsSnapshot(mediaSettings))
+  const preferences = settingsPreferences(useSettingsSnapshot(chatSettings))
   const running = useSession(snapshot => snapshot.running)
   const autoplayEnabled = preview?.kind === 'audio' ? preferences.audioAutoplay : preview?.kind === 'video' ? preferences.videoAutoplay : false
   const shouldAutoplay = preview === null ? false : mediaAutoplayGate(sessionId).observe(callId, block.time, autoplayEnabled, running)
@@ -583,7 +617,7 @@ export async function apply(ctx) {
   ctx.effect(() => ctx.locale.register('chat-enhancement-annotations', annotationLocales))
   const dispose = await ctx.remote.$mount(previewRemote)
   const sessions = ctx.get('sessions')
-  const mediaSettings = ctx.settingsScope.bind({ namespace: 'chat-enhancement' })
+  const chatSettings = ctx.settingsScope.bind({ namespace: 'chat-enhancement' })
   const mediaService = ctx.reflect.get('remote.chatMedia')
   const markdownService = ctx.reflect.get('remote.chatMarkdown')
   if (sessions === undefined || mediaService?.read === undefined || markdownService?.read === undefined) throw new Error('dsh-chat-enhancement preview services are unavailable.')
@@ -619,15 +653,16 @@ export async function apply(ctx) {
   ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
     name: 'conversation.chat.assistant-actions', id: 'chat-enhancement-turn-model', order: 20,
   }, TurnModelAction))
+  // 一个导航项装下本插件的全部偏好：语言在上，媒体展示在下。
   ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section', id: 'chat-enhancement-media', order: 65, label: () => '媒体播放',
-    inject: () => ({ mediaSettings }),
-  }, MediaSettingsSection))
+    name: 'settings.section', id: 'chat-enhancement', order: 65, label: () => '对话增强',
+    inject: () => ({ chatSettings }),
+  }, ChatEnhancementSettingsSection))
   // `read_image` is already rendered by DSH's built-in read-image toolview.
   // Registering it here causes the keyed slot to reject the whole custom
   // media-view batch, which can interrupt client initialization on reload.
   for (const key of ['show_image', 'show_video', 'show_audio']) {
-    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, locale: 'conversation' }, (props) => React.createElement(MediaToolView, { ...props, sessions, readMedia, mediaSettings })))
+    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key, locale: 'conversation' }, (props) => React.createElement(MediaToolView, { ...props, sessions, readMedia, chatSettings })))
   }
   return dispose
 }

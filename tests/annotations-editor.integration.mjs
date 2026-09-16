@@ -21,7 +21,7 @@ const hooks = registerHooks({
 try {
   const { SessionInputShell } = await import(pathToFileURL(resolve(process.env.DSH_SOURCE_ROOT, 'packages/client/ui-conversation/lib/types/client/input/facade.js')).href)
   const source = await readFile(new URL('../src/annotations.js', import.meta.url), 'utf8')
-  const { appendAnnotation } = vm.runInNewContext(source.replace(/^import .*\n/gmu, '').replace(/^export /gmu, '') + '\n;({appendAnnotation})')
+  const { appendAnnotation } = vm.runInNewContext(source.replace(/^import .*\r?\n/gmu, '').replace(/^export /gmu, '') + '\n;({appendAnnotation})')
   let submissions = 0
   let shell
   const scope = { bail(subject, event, request) {

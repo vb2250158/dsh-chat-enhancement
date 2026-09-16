@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { basename, extname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
+import { AUTO_LANGUAGE, languageInstruction } from './languages.js'
 
 const IMAGE_MEDIA_TYPES = {
   '.gif': 'image/gif',
@@ -26,7 +27,14 @@ const AUDIO_MEDIA_TYPES = {
 const DEFAULT_MAX_AUDIO_BYTES = 50 * 1024 * 1024
 const DEFAULT_MAX_VIDEO_BYTES = 50 * 1024 * 1024
 const DEFAULT_MAX_MARKDOWN_BYTES = 2 * 1024 * 1024
-const MEDIA_SETTINGS_NAMESPACE = 'chat-enhancement'
+const CHAT_ENHANCEMENT_SETTINGS_NAMESPACE = 'chat-enhancement'
+/**
+ * Prompt-section order, next to the other deployment instructions
+ * (`rabiroute:agent-contract` 25, `private:nas-workspace-support` 27) and well
+ * before the tool sections, so the chosen language governs how the model reads
+ * every instruction that follows.
+ */
+const LANGUAGE_SECTION_ORDER = 30
 
 const imageMediaTypeFor = (filePath) => IMAGE_MEDIA_TYPES[extname(filePath).toLowerCase()]
 const audioMediaTypeFor = (filePath) => AUDIO_MEDIA_TYPES[extname(filePath).toLowerCase()]
@@ -215,13 +223,28 @@ function profileProtocol() {
   return cachedProfileProtocol
 }
 
-function registerMediaSettings(ctx) {
-  ctx.inject(['settings'], (settingsCtx) => {
+/**
+ * Register the plugin's settings namespace and the model-language prompt section.
+ *
+ * The section text is a provider rather than a constant, so assembly reads the
+ * resolved setting on every model step: switching the language reaches the very
+ * next step of an already-running session, with no re-registration and no DSH
+ * restart. `auto` resolves to empty text, which `renderPrompt` drops, so an
+ * unconfigured deployment assembles the exact prompt it had before.
+ */
+function registerSettings(ctx) {
+  ctx.inject(['systemPrompt', 'settings'], (settingsCtx) => {
     const z = profileRequire()('@deepseek-ai/schemastery')
-    settingsCtx.settings.register(MEDIA_SETTINGS_NAMESPACE, z.object({
+    const settings = settingsCtx.settings.register(CHAT_ENHANCEMENT_SETTINGS_NAMESPACE, z.object({
       audioAutoplay: z.boolean().default(false),
       videoAutoplay: z.boolean().default(false),
+      language: z.string().default(AUTO_LANGUAGE),
     }))
+    settingsCtx.systemPrompt.section({
+      name: 'private:chat-enhancement-language',
+      order: LANGUAGE_SECTION_ORDER,
+      text: () => languageInstruction(settings.get().language),
+    })
   })
 }
 
@@ -272,10 +295,10 @@ function applyShowAudioTool(ctx, mediaStore) {
 export const name = 'chat-enhancement'
 export const inject = ['tools', 'fs', 'agents']
 
-/** Compose Agent media tools and the current-session media reader. */
+/** Compose Agent media tools, the current-session media reader, and the language preference. */
 export function apply(ctx, config = {}) {
   const resolved = resolveConfig(config)
-  registerMediaSettings(ctx)
+  registerSettings(ctx)
   const mediaStore = new MediaStore(resolved.maxAudioBytes, resolved.maxVideoBytes)
   const protocol = profileProtocol()
   const ChatMediaService = createMediaService(protocol, mediaStore)

@@ -7,7 +7,7 @@ import vm from 'node:vm'
 
 if (!process.env.DSH_PLAYWRIGHT_ROOT || !process.env.DSH_SOURCE_ROOT) throw new Error('Set DSH_PLAYWRIGHT_ROOT and DSH_SOURCE_ROOT to existing development dependencies and DSH source.')
 const { chromium } = await import(pathToFileURL(resolve(process.env.DSH_PLAYWRIGHT_ROOT, 'index.mjs')).href)
-const source = (await readFile(new URL('../src/annotations.js', import.meta.url), 'utf8')).replace(/^import .*\n/gmu, '').replace(/^export /gmu, '')
+const source = (await readFile(new URL('../src/annotations.js', import.meta.url), 'utf8')).replace(/^import .*\r?\n/gmu, '').replace(/^export /gmu, '')
 const panelStyle = vm.runInNewContext(source + '\n;annotationPanelStyle')
 const inputBackground = /background: '(var\(--dsw-alias-[^']+\))'/.exec(source.slice(source.indexOf("React.createElement('textarea'")))?.[1]
 assert.ok(inputBackground)

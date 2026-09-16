@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.3.27",
+  "version": "0.3.28",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
   "main": "lib/index.js",
@@ -42,6 +42,7 @@
     "src/index.js",
     "src/client.js",
     "src/annotations.js",
+    "src/languages.js",
     "src/typert.host.js",
     "cordis.patch.yml",
     "README.md",
