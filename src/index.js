@@ -29,12 +29,17 @@ const DEFAULT_MAX_VIDEO_BYTES = 50 * 1024 * 1024
 const DEFAULT_MAX_MARKDOWN_BYTES = 2 * 1024 * 1024
 const CHAT_ENHANCEMENT_SETTINGS_NAMESPACE = 'chat-enhancement'
 /**
- * Prompt-section order, next to the other deployment instructions
- * (`rabiroute:agent-contract` 25, `private:nas-workspace-support` 27) and well
- * before the tool sections, so the chosen language governs how the model reads
- * every instruction that follows.
+ * Prompt-section order: deliberately near the END of the assembled prompt
+ * (`DELIVERABLE_FILE_REFERENCES` 9000, `STRUCTURED_OUTPUT` 9900), not with the
+ * deployment instructions at 25–30 where it started life.
+ *
+ * Measured 2026-09-16: at order 30 the section was ignored and the model kept
+ * reasoning in English. Language is an output-shaping rule competing with a
+ * prompt whose every other line — and the whole tool transcript — is English,
+ * so it has to be among the last things read. The harness places its own
+ * persona suffix last (10200) for the same reason.
  */
-const LANGUAGE_SECTION_ORDER = 30
+const LANGUAGE_SECTION_ORDER = 9800
 
 const imageMediaTypeFor = (filePath) => IMAGE_MEDIA_TYPES[extname(filePath).toLowerCase()]
 const audioMediaTypeFor = (filePath) => AUDIO_MEDIA_TYPES[extname(filePath).toLowerCase()]

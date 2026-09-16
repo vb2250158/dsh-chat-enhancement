@@ -132,6 +132,10 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   // 语言分区必须读求值函数而不是常量，否则改设置要重启才生效。
   assert.match(host, /name: 'private:chat-enhancement-language'/)
   assert.match(host, /text: \(\) => languageInstruction\(settings\.get\(\)\.language\)/)
+  // 分区必须排在提示词末尾附近：language 是与满屏英文指令和英文工具输出竞争的输出规则，
+  // 排在 25–30 那段部署指令里时实测被模型忽略。
+  assert.match(host, /const LANGUAGE_SECTION_ORDER = (\d+)/)
+  assert.ok(Number(/const LANGUAGE_SECTION_ORDER = (\d+)/.exec(host)[1]) > 9000)
   // 语言名只写在 languages.js；Host 入口不得再抄一份。
   assert.doesNotMatch(host, /Simplified Chinese/)
   assert.doesNotMatch(host, /## Language Preference/)
@@ -349,7 +353,7 @@ test('the language catalog is the single source for both bundle halves', async (
 })
 
 test('only a concrete language contributes a prompt section', async () => {
-  const { AUTO_LANGUAGE, languageEntry, languageInstruction } = await import(new URL('./src/languages.js', root))
+  const { LANGUAGES, AUTO_LANGUAGE, languageEntry, languageInstruction } = await import(new URL('./src/languages.js', root))
 
   // 「跟随对话」和本版本不认识的 id 都必须返回空文本：renderPrompt 会丢弃零长度分区，
   // 未配置该偏好的部署因此装配出与升级前完全相同的系统提示。
@@ -360,13 +364,26 @@ test('only a concrete language contributes a prompt section', async () => {
   assert.equal(languageEntry(undefined).id, AUTO_LANGUAGE)
   assert.equal(languageEntry('ja').label, '日本語')
 
+  // 每个可选语言都必须自带母语祈使句：英文写的「请用中文思考」会被模型忽略，
+  // 因此 native 缺一条就等于那个语言选了没用。
+  for (const language of LANGUAGES.slice(1)) {
+    assert.equal(typeof language.name, 'string', `${language.id} has no prompt name`)
+    assert.equal(typeof language.native, 'string', `${language.id} has no native imperative`)
+    assert.ok(language.native.length > 0, `${language.id} has an empty native imperative`)
+  }
+
   const chinese = languageInstruction('zh-CN')
-  // 语言必须以明确名称加点名母语写法出现，模型才知道要产出哪一种。
+  // 母语那一句必须排在最前，指令本身就已经是目标语言。
+  assert.ok(chinese.startsWith('## Language Preference\n始终用简体中文思考和回复。'), chinese)
+  assert.ok(chinese.indexOf('始终用简体中文思考和回复。') < chinese.indexOf('Your reasoning'))
+  // 语言名以「英文名 + 母语写法」出现，模型才知道要产出哪一种。
   assert.match(chinese, /Simplified Chinese \(简体中文\)/)
-  // 同时约束可见回复与思考，并禁止翻译代码、路径、命令、日志与引文原文。
-  assert.match(chinese, /Write everything you say to the user in Simplified Chinese/)
-  assert.match(chinese, /Reason in Simplified Chinese/)
-  assert.match(chinese, /Never translate code, identifiers, file paths, shell commands, log output, error text, or quoted source/)
+  // 明确点名 reasoning，并堵掉「上下文全是英文所以我用英文想」这条退路。
+  assert.match(chinese, /Your reasoning and every user-visible reply must be in Simplified Chinese/)
+  assert.match(chinese, /Do not fall back to English for thinking/)
+  assert.match(chinese, /Never translate code, identifiers, file paths, shell commands, log output, error text, or quoted text/)
   assert.notEqual(languageInstruction('en'), languageInstruction('ja'))
+  assert.match(languageInstruction('ja'), /常に日本語で考え、日本語で回答してください。/)
   assert.match(languageInstruction('ar'), /Arabic \(العربية\)/)
+  assert.match(languageInstruction('ar'), /فكّر وأجب دائمًا بالعربية\./)
 })

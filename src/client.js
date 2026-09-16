@@ -367,7 +367,7 @@ function ChatEnhancementSettingsSection({ chatSettings }) {
     React.createElement('div', { style: settingsRowStyle },
       React.createElement('span', null, '思考与回复语言'),
       React.createElement(LanguagePicker, { chatSettings, selected, writable })),
-    React.createElement('p', { style: mutedStyle }, '约束模型思考与回复使用的语言，与「通用设置」里的界面语言互不影响。选择「跟随对话」时不注入任何额外约束。改动从下一个模型步骤起生效，不必重开会话或重启 DSH；代码、路径、命令、日志与引文原文始终保留原样，不翻译。需要在某一轮临时改用别的语言，直接在对话里说即可。'),
+    React.createElement('p', { style: mutedStyle }, '约束模型思考与回复使用的语言，与「通用设置」里的界面语言互不影响。选择「跟随对话」时不注入任何额外约束。改动从下一个模型步骤起生效，不必重开会话或重启 DSH；代码、路径、命令、日志与引文原文始终保留原样，不翻译。需要在某一轮临时改用别的语言，直接在对话里说即可。极少数对语言指令遵循很弱的模型可能仍用英文思考——那属于模型行为，不是本设置未生效。'),
     React.createElement('h3', { style: settingsGroupStyle }, '媒体展示'),
     toggle('audioAutoplay', 'Agent 展示音频时自动播放'),
     toggle('videoAutoplay', 'Agent 展示视频时自动播放'),
