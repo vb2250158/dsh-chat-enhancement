@@ -13,7 +13,7 @@ await writeFile(new URL('lib/client.js', root), `window.__ModuleLoader__.load({
   id: 'dsh-chat-enhancement',
   factory: (require) => {
     const React = require('react')
-    const { MarkdownText, Button } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { MarkdownText, Button, Menu, IconChevronDownOutline14 } = require('@deepseek-ai/dsh-client-ui-primitives')
 ${languages}
 ${annotations}
 ${client}

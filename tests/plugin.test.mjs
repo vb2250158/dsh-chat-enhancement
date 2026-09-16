@@ -32,7 +32,7 @@ async function loadBrowserPlugin() {
   })
   return loaderEntry.factory((name) => {
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {} }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutline14() {} }
     throw new Error(`unexpected browser dependency: ${name}`)
   })
 }
@@ -46,7 +46,7 @@ async function loadBrowserHelpers() {
   })
   return loaderEntry.factory((name) => {
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {} }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutline14() {} }
     throw new Error(`unexpected browser dependency: ${name}`)
   })
 }
@@ -86,7 +86,14 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   // 本插件只占一个设置导航项：id `chat-enhancement`，标签「对话增强」。
   assert.match(client, /id: 'chat-enhancement', order: 65, label: \(\) => '对话增强'/)
   assert.match(client, /ChatEnhancementSettingsSection/)
-  assert.match(client, /chatSettings\.set\('language', event\.target\.value\)/)
+  assert.match(client, /LanguagePicker/)
+  assert.match(client, /onSelect: \(id\) => \{ setOpen\(false\); void chatSettings\.set\('language', id\) \}/)
+  // 原生 <select> 的弹层由系统绘制，`--dsw-*` 令牌管不到它，所以必须走 Menu 原语。
+  assert.doesNotMatch(client, /createElement\('select'/)
+  assert.doesNotMatch(client, /languageSelectStyle/)
+  assert.match(client, /const \{ MarkdownText, Button, Menu, IconChevronDownOutline14 \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
+  assert.match(client, /variant: 'outline'/)
+  assert.match(client, /aria-haspopup': 'menu'/)
   assert.match(client, /audioAutoplay/)
   assert.match(client, /videoAutoplay/)
   assert.match(client, /MarkdownText/)

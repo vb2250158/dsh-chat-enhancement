@@ -4,6 +4,12 @@
 
 ## 更新日志
 
+### 0.3.29
+
+- 语言下拉改为 DSH 主题化控件：原生 `<select>` 的弹出列表由操作系统绘制，`--dsw-*` 令牌管不到它，在深色主题下会弹出一块浅色的系统菜单。现在改用公开原语 `Menu`（与「通用设置」里的界面语言行同一个）承载列表，触发按钮用 `Button`（`variant: outline`、`size: sm`），颜色、悬停、禁用态全部来自主题令牌，浅色/深色/自定义主题一致。
+- 列表走 portal，避免被设置面板的滚动容器裁切；键盘可达（`aria-haspopup="menu"`、`aria-expanded`、Escape 关闭）。组件抽出为 `LanguagePicker`，活动语言名与回退逻辑复用语言目录的 `languageEntry()`。
+- 未新增持久化数据或配置迁移；升级后需重新加载插件并刷新页面。
+
 ### 0.3.28
 
 - 设置菜单新增一个「对话增强」分区，本插件的全部偏好都收在里面（原先独立占一项的「媒体播放」并入其中）：上半部分选择模型思考与回复使用的语言，下半部分保留媒体展示自动播放开关。语言可选跟随对话（默认）、简体中文、繁體中文、English、日本語、한국어、Français、Deutsch、Español、Português、Italiano、Nederlands、Polski、Svenska、Русский、Українська、Türkçe、العربية、עברית、हिन्दी、ไทย、Tiếng Việt、Bahasa Indonesia、Bahasa Melayu。语言与「通用设置」中的界面语言互不影响。
