@@ -65,7 +65,15 @@ test('DOM selection, saved quote, IME, cancellation, retry and session isolation
     failure = null
     click(document.querySelector('[data-dsh-annotation] button:last-child'))
     assert.equal(calls.length, 2)
-    assert.deepEqual([...calls[1]], ['one', 'message-one\n\n选中原文🙂', '我的批注\n下一行'])
+    // The payload is built inside the `node:vm` sandbox, so its objects carry
+    // that realm's prototype and `deepStrictEqual` would reject an equal-shape
+    // literal. Compare the fields instead of the object identity chain.
+    assert.equal(calls[1][0], 'one')
+    assert.equal(calls[1][1].quote, '选中原文🙂')
+    assert.equal(calls[1][1].note, '我的批注\n下一行')
+    assert.equal(calls[1][1].target.msgKey, 'message-one')
+    assert.equal(calls[1][1].target.msgKind, null)
+    assert.equal(calls[1][1].target.seq, null)
     assert.equal(document.querySelector('[data-dsh-annotation]'), null)
     select(); click(document.querySelector('[data-dsh-annotation] button'))
     act(() => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
@@ -106,7 +114,9 @@ test('DOM selection, saved quote, IME, cancellation, retry and session isolation
     click(document.querySelector('[data-dsh-annotation] button'))
     type('文件意见')
     click(document.querySelector('[data-dsh-annotation] button:last-child'))
-    assert.equal(calls[2][1], 'notes.md\n\n文档正文')
+    assert.equal(calls[2][1].quote, '文档正文')
+    assert.equal(calls[2][1].note, '文件意见')
+    assert.equal(calls[2][1].target.msgKey, 'notes.md')
     assert.equal(previewClicks, 0)
     assert.ok(markdown.isConnected)
     const second = document.createElement('p')

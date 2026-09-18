@@ -292,7 +292,13 @@ function useSettingsSnapshot(scope) {
  * Schema defaults, repeated so a section renders before the settings transport
  * answers and after it fails. Kept in step with the Host schema by the tests.
  */
-const SETTINGS_DEFAULTS = { audioAutoplay: false, videoAutoplay: false, language: AUTO_LANGUAGE, toolDescriptions: true }
+const SETTINGS_DEFAULTS = {
+  audioAutoplay: false,
+  videoAutoplay: false,
+  language: AUTO_LANGUAGE,
+  toolDescriptions: true,
+  expandReasoningWhileRunning: false,
+}
 
 /**
  * Menu rows projected from the shared catalog. Built once, because the
@@ -368,6 +374,9 @@ function ChatEnhancementSettingsSection({ chatSettings }) {
       React.createElement('span', null, '思考与回复语言'),
       React.createElement(LanguagePicker, { chatSettings, selected, writable })),
     React.createElement('p', { style: mutedStyle }, '约束模型思考与回复使用的语言，与「通用设置」里的界面语言互不影响。选择「跟随对话」时不注入任何额外约束。改动从下一个模型步骤起生效，不必重开会话或重启 DSH；代码、路径、命令、日志与引文原文始终保留原样，不翻译。需要在某一轮临时改用别的语言，直接在对话里说即可。极少数对语言指令遵循很弱的模型可能仍用英文思考——那属于模型行为，不是本设置未生效。'),
+    React.createElement('h3', { style: settingsGroupStyle }, '思考行'),
+    toggle('expandReasoningWhileRunning', '推理中自动展开'),
+    React.createElement('p', { style: mutedStyle }, '开启后，思考进行中的 Thinking 行会自动展开显示全文，并跟随最新内容滚动；思考一结束就恢复成默认的折叠摘要。DSH 默认始终把 Thinking 行渲染成一行折叠摘要，本开关只驱动那一行自带的展开控件，因此展开内容、折叠高度和无障碍状态仍由官方渲染器决定。你手动展开过的行不会被自动收起；关闭本开关会收起自动展开的行。'),
     React.createElement('h3', { style: settingsGroupStyle }, '工具行'),
     toggle('toolDescriptions', '显示模型自述的本次调用说明'),
     React.createElement('p', { style: mutedStyle }, '给每个工具声明一个可选的 description 参数，模型就会用一句话说明这次调用要做什么，显示在对话界面的工具行上（bash 一直是这么显示的）。这一半由本插件完成；界面显示部分还需要仓库 patches/ 里的官方补丁并重新构建客户端——没打补丁时模型仍会填写，但工具行只显示原来的路径或参数。'),
@@ -595,6 +604,105 @@ function ThinkingGroupController() {
   return React.createElement(ThinkingActivityGroupController)
 }
 
+/**
+ * Rows DSH itself opened, so the controller only closes what it opened.
+ *
+ * The Think row owns its expanded state in React (`useState(false)`), and the
+ * attribute is written from that state — setting it directly would be reverted
+ * on the next render. The controller therefore drives the row through its real
+ * disclosure target and remembers the rows it expanded; a row the user opened
+ * by hand keeps its own state and is never auto-collapsed.
+ */
+const autoExpandedThinkRows = new WeakSet()
+
+/** The clickable disclosure target of one Think row, if it is expandable. */
+function thinkRowTarget(row) {
+  const target = row.querySelector('[data-disclosure-row][data-expandable]')
+  return target instanceof HTMLElement ? target : null
+}
+
+/** Whether one Think row is currently rendered as expanded. */
+function thinkRowExpanded(row) {
+  return row.dataset.expanded !== undefined
+}
+
+/**
+ * Expand a streaming Think row and remember that this controller did it.
+ * @param row - the `[data-variant="think"]` row to open.
+ */
+function expandRunningThinkRow(row) {
+  const target = thinkRowTarget(row)
+  if (target === null || thinkRowExpanded(row)) return
+  autoExpandedThinkRows.add(row)
+  target.click()
+}
+
+/**
+ * Collapse a Think row this controller expanded, once its reasoning settled.
+ * @param row - the `[data-variant="think"]` row to close.
+ */
+function collapseSettledThinkRow(row) {
+  if (!autoExpandedThinkRows.has(row)) return
+  autoExpandedThinkRows.delete(row)
+  if (!thinkRowExpanded(row)) return
+  thinkRowTarget(row)?.click()
+}
+
+/**
+ * Drive `推理中自动展开`: open each Think row while its reasoning is streaming
+ * and restore the collapsed summary as soon as it settles.
+ *
+ * DSH renders every Think row collapsed — the streaming tail follows the
+ * latest reasoning line inside a fixed-height summary (`ReasoningRow`). This
+ * controller only mirrors that row's own disclosure control, so the expanded
+ * body, the 24px collapsed height, and the a11y tree all stay DSH's.
+ *
+ * @param props.chatSettings - bound settings scope carrying the preference.
+ * @returns a controller that renders nothing.
+ */
+function ReasoningAutoExpandController({ chatSettings }) {
+  const preferences = settingsPreferences(useSettingsSnapshot(chatSettings))
+  const enabled = preferences.expandReasoningWhileRunning === true
+  React.useEffect(() => {
+    if (!enabled) {
+      // Turning the preference off closes only the rows this controller opened;
+      // a row the user expanded by hand keeps its state.
+      for (const row of document.querySelectorAll('[data-variant="think"]')) {
+        collapseSettledThinkRow(row)
+      }
+      return undefined
+    }
+    let frame = null
+    const schedule = () => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(() => {
+        frame = null
+        sync()
+      })
+    }
+    const sync = () => {
+      for (const row of document.querySelectorAll('[data-variant="think"]')) {
+        if (row.dataset.state === 'running') expandRunningThinkRow(row)
+        else collapseSettledThinkRow(row)
+      }
+    }
+    const observer = new MutationObserver(schedule)
+    // `subtree` on the flow column: a Think row appears, flips to `running`,
+    // and settles as attributes on nodes DSH already mounted.
+    observer.observe(document.body, { attributes: true, childList: true, subtree: true })
+    schedule()
+    return () => {
+      observer.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [enabled])
+  return null
+}
+
+function ReasoningAutoExpandSlot(props) {
+  return React.createElement(ReasoningAutoExpandController, props)
+}
+
 /** 本轮实际使用的模型取自 Trajectory 的 assistant 节点 requestConfig（含 messageId）。 */
 function modelForMessage(nodes, messageId) {
   if (!Array.isArray(nodes)) return null
@@ -686,8 +794,12 @@ export async function apply(ctx) {
     name: 'conversation.input.dock', id: 'chat-enhancement-thinking-groups', order: 102,
   }, ThinkingGroupController))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+    name: 'conversation.input.dock', id: 'chat-enhancement-reasoning-auto-expand', order: 102.5,
+    inject: () => ({ chatSettings }),
+  }, ReasoningAutoExpandSlot))
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'chat-enhancement-annotations', order: 103, locale: 'chat-enhancement-annotations',
-    inject: () => ({ append: (sessionId, quote, note) => appendAnnotation(sessions, ctx.conversation, sessionId, quote, note) }),
+    inject: () => ({ append: (sessionId, annotation) => appendAnnotation(sessions, ctx.conversation, sessionId, annotation) }),
   }, props => React.createElement(AnnotationController, { ...props, key: props.sessionId })))
   // 追加到已定稿 assistant 消息的操作行（list 槽位按 id 追加，不替换 DSH 原生操作）。
   const TurnModelAction = props => React.createElement(TurnModelBadge, { ...props, key: props.messageId })

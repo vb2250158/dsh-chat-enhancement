@@ -314,6 +314,10 @@ function registerSettings(ctx) {
     const settings = settingsCtx.settings.register(CHAT_ENHANCEMENT_SETTINGS_NAMESPACE, z.object({
       audioAutoplay: z.boolean().default(false),
       videoAutoplay: z.boolean().default(false),
+      // Purely presentational: the browser half drives DSH's own Think-row
+      // disclosure while reasoning streams. The Host only persists it, because
+      // a browser-local store would not survive a reload or reach another tab.
+      expandReasoningWhileRunning: z.boolean().default(false),
       language: z.string().default(AUTO_LANGUAGE),
       toolDescriptions: z.boolean().default(true),
     }))

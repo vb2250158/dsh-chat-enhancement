@@ -17,6 +17,6 @@ await writeFile(new URL('lib/client.js', root), `window.__ModuleLoader__.load({
 ${languages}
 ${annotations}
 ${client}
-    return { inject, apply, createMediaAutoplayGate, modelForMessage }
+    return { inject, apply, createMediaAutoplayGate, modelForMessage, thinkRowTarget, thinkRowExpanded, expandRunningThinkRow, collapseSettledThinkRow }
   },
 })\n`)
