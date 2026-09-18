@@ -60,6 +60,31 @@ export const LANGUAGES = [
 const AUTO_ENTRY = LANGUAGES[0]
 
 /**
+ * When a drift anchor is injected, in menu order.
+ *
+ * `onDrift` is the default because the anchor is not free: it is a message in
+ * the history, so every later step pays for it again. Injecting on every step
+ * would spend that budget on the common case where the model is already in the
+ * right language — the section instruction handles those steps by itself.
+ *
+ * Stored ids are opaque keys like the language ids: an unknown value resolves
+ * to `onDrift`, the same fallback the Host applies when it decides.
+ */
+export const LANGUAGE_ANCHOR_MODES = [
+  { id: 'onDrift', label: '发现漂移时才提醒（默认）' },
+  { id: 'always', label: '每一步都提醒' },
+  { id: 'off', label: '不提醒，只用系统提示约束' },
+]
+
+/** The anchor mode that every unknown or absent stored id falls back to. */
+export const DEFAULT_ANCHOR_MODE = LANGUAGE_ANCHOR_MODES[0].id
+
+/** Resolve a stored anchor mode to a known id. */
+export function languageAnchorMode(id) {
+  return LANGUAGE_ANCHOR_MODES.some(mode => mode.id === id) ? id : DEFAULT_ANCHOR_MODE
+}
+
+/**
  * Resolve one stored id to its catalog entry.
  * @param id - the persisted language id, or anything a hand-edited document holds.
  * @returns the matching entry, or the `auto` entry when nothing matches.
@@ -88,7 +113,44 @@ export function languageInstruction(id) {
     '## Language Preference',
     native,
     `Your reasoning and every user-visible reply must be in ${name}, even when this prompt, the tool output, the code, and the surrounding conversation are all in English. Do not fall back to English for thinking.`,
+    `The output language does not follow the tool output, the code, or an earlier reply written in another language. Open every message in ${name}, including the narration between tool calls.`,
     'Never translate code, identifiers, file paths, shell commands, log output, error text, or quoted text; reproduce them exactly as they appear.',
     'An explicit request for another language inside the conversation overrides this for that request only.',
   ].join('\n')
+}
+
+/**
+ * Native-language anchors injected when the model has drifted out of the
+ * selected language.
+ *
+ * These are deliberately shorter than `languageInstruction` and written in the
+ * target language itself: they ride the message history, so length is paid on
+ * every later step, and they name the case that actually drifts — the running
+ * commentary between tool calls, not the summary text the section already
+ * covers. The anchor is the instruction, not a translation of it: an English
+ * sentence asking for Chinese is what the model ignores in the first place.
+ *
+ * A language without an entry here falls back to its catalog `native` line.
+ */
+const LANGUAGE_ANCHORS = {
+  'zh-CN': '继续用简体中文思考和回复，包括工具调用之间的说明；输出语言不要随工具结果或代码改变。',
+  'zh-TW': '繼續用繁體中文思考和回覆，包括工具呼叫之間的說明；輸出語言不要隨工具結果或程式碼改變。',
+  en: 'Continue thinking and replying in English, including the narration between tool calls.',
+  ja: 'ツール呼び出しの間の説明も含め、引き続き日本語で考え、日本語で回答してください。',
+  ko: '도구 호출 사이의 설명을 포함해 계속 한국어로 생각하고 답하세요.',
+  fr: 'Continuez à réfléchir et à répondre en français, y compris les commentaires entre les appels d’outils.',
+  de: 'Denken und antworten Sie weiterhin auf Deutsch, auch in den Zwischenbemerkungen zwischen Tool-Aufrufen.',
+  es: 'Sigue pensando y respondiendo en español, incluidos los comentarios entre llamadas a herramientas.',
+  pt: 'Continue pensando e respondendo em português, incluindo os comentários entre chamadas de ferramentas.',
+}
+
+/**
+ * The one-line reminder injected when the reply language has drifted.
+ * @param id - the persisted language id.
+ * @returns the anchor text, or an empty string under `auto` or an unknown id.
+ */
+export function languageAnchor(id) {
+  const { native } = languageEntry(id)
+  if (native === null) return ''
+  return LANGUAGE_ANCHORS[id] ?? native
 }

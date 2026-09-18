@@ -86,8 +86,12 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   // 本插件只占一个设置导航项：id `chat-enhancement`，标签「对话增强」。
   assert.match(client, /id: 'chat-enhancement', order: 65, label: \(\) => '对话增强'/)
   assert.match(client, /ChatEnhancementSettingsSection/)
-  assert.match(client, /LanguagePicker/)
-  assert.match(client, /onSelect: \(id\) => \{ setOpen\(false\); void chatSettings\.set\('language', id\) \}/)
+  // 语言与漂移提醒两行都走同一个枚举选择器；断言到驱动它的 field，
+  // 而不是组件名——组件是内部实现，重命名不该让这条契约失败。
+  assert.match(client, /SettingPicker/)
+  assert.match(client, /field: 'language'/)
+  assert.match(client, /field: 'languageAnchor'/)
+  assert.match(client, /onSelect: \(id\) => \{ setOpen\(false\); void chatSettings\.set\(field, id\) \}/)
   // 原生 <select> 的弹层由系统绘制，`--dsw-*` 令牌管不到它，所以必须走 Menu 原语。
   assert.doesNotMatch(client, /createElement\('select'/)
   assert.doesNotMatch(client, /languageSelectStyle/)
@@ -139,7 +143,16 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(host, /audioAutoplay: z\.boolean\(\)\.default\(false\)/)
   assert.match(host, /videoAutoplay: z\.boolean\(\)\.default\(false\)/)
   assert.match(host, /language: z\.string\(\)\.default\(AUTO_LANGUAGE\)/)
-  assert.match(host, /import \{ AUTO_LANGUAGE, languageInstruction \} from '\.\/languages\.js'/)
+  // 只断言语言目录是唯一来源与两个必需符号，不锁死 import 列表——
+  // 新增符号（如 languageAnchor）不该让每个消费者测试跟着改。
+  assert.match(host, /import \{([^}]*)\} from '\.\/languages\.js'/u)
+  {
+    const imported = /import \{([^}]*)\} from '\.\/languages\.js'/u.exec(host)[1]
+      .split(',')
+      .map(symbol => symbol.trim())
+    assert.ok(imported.includes('AUTO_LANGUAGE'))
+    assert.ok(imported.includes('languageInstruction'))
+  }
   // 语言分区必须读求值函数而不是常量，否则改设置要重启才生效。
   assert.match(host, /name: 'private:chat-enhancement-language'/)
   assert.match(host, /text: \(\) => languageInstruction\(settings\.get\(\)\.language\)/)
@@ -525,4 +538,87 @@ test('推理中自动展开只开流式中的行，并在结算后收起自己�
   assert.equal(thinkRowTarget(inert), null)
   expandRunningThinkRow(inert)
   collapseSettledThinkRow(inert)
+})
+
+test('language anchors fire only when the reply language has actually drifted', async () => {
+  const { cjkRatio, shouldAnchorLanguage } = await import(new URL('./lib/index.js', root))
+  // 阈值判定的是「汉字在全部字母/汉字里占多少」——代码标识符越多，汉字回复的
+  // 比例就越低，所以中文样例的期望值必须按含代码密度分档，不能一律取高值。
+  assert.ok(cjkRatio('现在读取计划详情与相关源码。') > 0.9)
+  // 含路径的短句：汉字约 7 字、拉丁字母约 27 个，比例落在 0.2 附近。
+  assert.ok(cjkRatio('已修复 packages/core/agent/src/agent.ts 里的问题。') > 0.15)
+  // 漂移的英文回复实测 0.00–0.03。
+  assert.ok(cjkRatio('Now let me check the route config for allowedFileRoots...') < 0.05)
+  // 没有字母也没有汉字（纯数字、标点、emoji）不构成漂移证据。
+  assert.equal(cjkRatio('12345 ... 🙂🙂'), undefined)
+  assert.equal(cjkRatio(''), undefined)
+
+  // off：任何步骤都不注入。
+  assert.equal(shouldAnchorLanguage('off', 5, 'all english here'), false)
+  // always：第一步之后每步都注入。
+  assert.equal(shouldAnchorLanguage('always', 2, '全部中文的一段回复。'), true)
+  // 第一步没有可判断的产物，即便 always 也不注入。
+  assert.equal(shouldAnchorLanguage('always', 1, ''), false)
+  assert.equal(shouldAnchorLanguage('onDrift', 1, 'all english here'), false)
+  // onDrift：中文正常不注入，漂移才注入。
+  assert.equal(shouldAnchorLanguage('onDrift', 3, '已读取配置并核对路径。'), false)
+  assert.equal(shouldAnchorLanguage('onDrift', 3, 'Now let me check the route config...'), true)
+  // 无法判断（无字母汉字）时不注入，避免把纯代码片段误判成漂移。
+  assert.equal(shouldAnchorLanguage('onDrift', 3, '12345 🙂'), false)
+  // 没有历史（首轮工具步骤）同样不注入。
+  assert.equal(shouldAnchorLanguage('onDrift', 3, undefined), false)
+})
+
+test('the latest assistant text is read from the session surface, skipping empty steps', async () => {
+  const { latestAssistantText } = await import(new URL('./lib/index.js', root))
+  const text = value => ({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: value }] } } })
+  const toolOnly = { type: 'assistant/message', data: { message: { content: [{ type: 'tool-call', name: 'read' }] } } }
+  const session = nodes => ({
+    surface: { nodes: [...nodes.keys()] },
+    eventAt: index => [...nodes.values()][index],
+  })
+  // 最新一条是纯工具调用时，继续往前找模型最后说过的内容，
+  // 而不是把它当成「空回复」判成漂移。
+  assert.equal(latestAssistantText(session([{ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '已读取配置。' }] } } }, toolOnly])), '已读取配置。')
+  // 多文本块按顺序拼接。
+  const multi = { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第一段' }, { type: 'text', text: '第二段' }] } } }
+  assert.equal(latestAssistantText(session([multi, toolOnly])), '第一段\n第二段')
+  // 会话里还没有助手输出。
+  assert.equal(latestAssistantText(session([{ type: 'user/message', data: { message: { content: [{ type: 'text', text: 'hi' }] } } }])), undefined)
+  assert.equal(latestAssistantText(session([])), undefined)
+  // 形态异常不得抛：宿主插件跑在真实会话上，宁可放弃判断。
+  assert.equal(latestAssistantText({}), undefined)
+  assert.equal(latestAssistantText(session([{ type: 'assistant/message', data: { message: { content: null } } }])), undefined)
+  assert.equal(latestAssistantText(session([text('   ')])), undefined)
+})
+
+test('anchors are identified by their plugin source, not by content', async () => {
+  const { isLanguageAnchor } = await import(new URL('./lib/index.js', root))
+  assert.equal(isLanguageAnchor({ source: { kind: 'plugin', plugin: 'chat-enhancement-language-anchor' } }), true)
+  // 普通用户消息、别的插件、以及我们自己别的注入都不算锚点。
+  assert.equal(isLanguageAnchor({ source: { kind: 'user' } }), false)
+  assert.equal(isLanguageAnchor({ source: { kind: 'plugin', plugin: 'other' } }), false)
+  assert.equal(isLanguageAnchor({ source: { kind: 'agent-instructions' } }), false)
+  assert.equal(isLanguageAnchor({}), false)
+  assert.equal(isLanguageAnchor(null), false)
+  assert.equal(isLanguageAnchor(undefined), false)
+})
+
+test('every language that constrains output also carries a native anchor', async () => {
+  const { languageAnchor, languageInstruction, LANGUAGES } = await import(new URL('../src/languages.js', import.meta.url))
+  const configured = LANGUAGES.filter(entry => entry.native !== null)
+  assert.ok(configured.length > 10, '目录里应有多语言条目')
+  for (const entry of configured) {
+    const anchor = languageAnchor(entry.id)
+    // 锚点必须非空（缺专用文案时回退到目录里的母语祈使句），
+    // 否则漂移时注入不了任何东西。
+    assert.notEqual(anchor, '', `${entry.id} 缺少锚点文案`)
+    // 锚点进消息历史，必须比系统提示那条短得多。
+    assert.ok(anchor.length <= 120, `${entry.id} 的锚点过长：${anchor.length}`)
+  }
+  // auto 不约束语言，也没有锚点。
+  assert.equal(languageAnchor('auto'), '')
+  assert.equal(languageInstruction('auto'), '')
+  // 未知 id 走 auto 语义。
+  assert.equal(languageAnchor('nope'), '')
 })

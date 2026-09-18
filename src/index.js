@@ -4,7 +4,14 @@ import { randomUUID } from 'node:crypto'
 import { basename, extname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { AUTO_LANGUAGE, languageInstruction } from './languages.js'
+import {
+  AUTO_LANGUAGE,
+  DEFAULT_ANCHOR_MODE,
+  LANGUAGE_ANCHOR_MODES,
+  languageAnchor,
+  languageAnchorMode,
+  languageInstruction,
+} from './languages.js'
 
 const IMAGE_MEDIA_TYPES = {
   '.gif': 'image/gif',
@@ -38,8 +45,26 @@ const CHAT_ENHANCEMENT_SETTINGS_NAMESPACE = 'chat-enhancement'
  * prompt whose every other line — and the whole tool transcript — is English,
  * so it has to be among the last things read. The harness places its own
  * persona suffix last (10200) for the same reason.
+ *
+ * Moved past the remaining English tail (`STRUCTURED_OUTPUT` 9900,
+ * `HARNESS_SOURCE` 10000, `WEB_SURFACE` 10100, `DEPLOYMENT_PERSONA_SUFFIX`
+ * 10200) so nothing but the persona suffix follows it. This is a no-op for a
+ * single step — 2026-09-18 A/B measured no difference — but it is free, and on
+ * a long context the section is no longer read before ~1.9k characters of
+ * English. The drift that survives both placements is what the anchor below
+ * addresses.
  */
-const LANGUAGE_SECTION_ORDER = 9800
+const LANGUAGE_SECTION_ORDER = 10300
+
+/**
+ * Below this CJK share, the last assistant reply counts as drifted.
+ *
+ * Measured on a real `zh-CN` session: ordinary Chinese replies land at 0.4–0.9
+ * (identifiers, paths and commands are legitimately Latin, so a fully Chinese
+ * answer is nowhere near 1.0), while a drifted English reply measures 0.00–0.03.
+ * The gap is wide, so the exact cut is not delicate.
+ */
+const DRIFT_THRESHOLD = 0.2
 
 const imageMediaTypeFor = (filePath) => IMAGE_MEDIA_TYPES[extname(filePath).toLowerCase()]
 const audioMediaTypeFor = (filePath) => AUDIO_MEDIA_TYPES[extname(filePath).toLowerCase()]
@@ -298,6 +323,113 @@ export function describeTools(assembly, hint) {
   return changed ? { ...assembly, tools } : assembly
 }
 
+/** Fraction of CJK ideographs among the letters in one string. */
+export function cjkRatio(text) {
+  const cjk = (text.match(/[\u4e00-\u9fff]/gu) ?? []).length
+  const latin = (text.match(/[A-Za-z]/gu) ?? []).length
+  // Nothing to measure: an empty reply, or one that is all digits, punctuation
+  // and emoji. Neither is evidence of drift, so say so instead of scoring 0.
+  return cjk + latin === 0 ? undefined : cjk / (cjk + latin)
+}
+
+/**
+ * The most recent assistant text the model has already produced.
+ *
+ * Walks the session surface from the newest node: only `assistant/message`
+ * carries visible model output, and a step that ended in tool calls still has
+ * its narration there, which is exactly the text that drifts first. A step
+ * with no text block (a pure tool call) is skipped rather than treated as
+ * "empty and therefore drifted", so the check keeps looking back at the last
+ * thing the model actually said.
+ * @param session - the live Agent session.
+ * @returns the joined text, or undefined when the session has none yet.
+ */
+export function latestAssistantText(session) {
+  const nodes = session?.surface?.nodes
+  if (nodes === undefined) return undefined
+  for (const seq of nodes.toReversed()) {
+    // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read.
+    const event = session.eventAt(seq)
+    if (event?.type !== 'assistant/message') continue
+    const content = event.data?.message?.content
+    if (!Array.isArray(content)) continue
+    const text = content
+      .filter(block => block?.type === 'text' && typeof block.text === 'string')
+      .map(block => block.text)
+      .join('\n')
+    if (text.trim() !== '') return text
+  }
+  return undefined
+}
+
+/**
+ * Whether this step should carry a language anchor.
+ *
+ * Split out from the event handler so the policy is testable without standing
+ * up a plugin host: `off` never fires, `always` fires every step past the
+ * first, and `onDrift` fires only when the last reply measured as drifted.
+ * `auto` is the caller's concern (there is no language to anchor to).
+ * @param mode - the stored `languageAnchor` setting.
+ * @param step - the step about to run.
+ * @param lastText - the previous assistant text, when the session has one.
+ * @returns whether an anchor belongs on this step.
+ */
+export function shouldAnchorLanguage(mode, step, lastText) {
+  if (mode === 'off') return false
+  // The first step has no prior model output to judge and nothing to correct.
+  if (step <= 1) return false
+  if (mode !== 'onDrift') return true
+  const ratio = cjkRatio(lastText ?? '')
+  return ratio !== undefined && ratio < DRIFT_THRESHOLD
+}
+
+/**
+ * Re-assert the reply language whenever the model has drifted out of it.
+ *
+ * A soft prompt section loses to a long English transcript: one step slips,
+ * that English reply becomes history, and every later step reads a context
+ * that is now mostly English — the measured failure reached a 157-step session
+ * that never returned to Chinese. Repeating the rule at the drift site is what
+ * breaks the self-reinforcement, and the reminder is written in the target
+ * language because an English sentence asking for Chinese is the very thing
+ * the model follows into English.
+ *
+ * The anchor enters as a plugin-sourced user message the step actually
+ * consumes — the official `agent-instructions` pattern, which splices into
+ * `decision.messages` rather than leaving a message in the inbox. A prepend to
+ * `nextStep` would only be claimed by the *following* step, one step too late
+ * to stop the drift it just detected.
+ *
+ * Only one anchor is pending at a time: a fresh one replaces the previous, and
+ * it only survives while the model is still drifting.
+ * @param settingsCtx - the scope that owns the plugin's settings.
+ * @param settings - the registered settings handle.
+ */
+function registerLanguageAnchor(settingsCtx, settings) {
+  settingsCtx.on('agent/pre-step', async ({ agent, step }, next) => {
+    const decision = await next()
+    if (decision.kind === 'reject') return decision
+    const current = settings.get()
+    if (current.language === AUTO_LANGUAGE) return decision
+    if (!shouldAnchorLanguage(languageAnchorMode(current.languageAnchor), step, latestAssistantText(agent.session))) return decision
+    const text = languageAnchor(current.language)
+    if (text === '') return decision
+    const { createUserMessage } = profileRequire()('@deepseek-ai/dsh-llm')
+    const message = createUserMessage({
+      content: [{ type: 'text', text }],
+      source: { kind: 'plugin', plugin: 'chat-enhancement-language-anchor' },
+    })
+    // Keep the anchor last: the rule belongs immediately before the model, and
+    // re-inserting an identical payload would otherwise pile up one per step.
+    const retained = decision.messages.filter(entry => !isLanguageAnchor(entry))
+    return { ...decision, messages: [...retained, message] }
+  })
+}
+
+/** Identity test for the anchor messages this plugin injects. */
+export const isLanguageAnchor = message => message?.source?.kind === 'plugin'
+  && message?.source?.plugin === 'chat-enhancement-language-anchor'
+
 /**
  * Register the plugin's settings namespace, the model-language prompt section,
  * and the per-call tool description property.
@@ -319,6 +451,11 @@ function registerSettings(ctx) {
       // a browser-local store would not survive a reload or reach another tab.
       expandReasoningWhileRunning: z.boolean().default(false),
       language: z.string().default(AUTO_LANGUAGE),
+      // The allowed ids come from the shared catalog, so the browser picker and
+      // this validator cannot disagree about what a valid mode is. The Host
+      // still falls back through `languageAnchorMode` for hand-edited documents,
+      // because schemastery rejects an unknown value rather than defaulting it.
+      languageAnchor: z.union(LANGUAGE_ANCHOR_MODES.map(mode => z.const(mode.id))).default(DEFAULT_ANCHOR_MODE),
       toolDescriptions: z.boolean().default(true),
     }))
     settingsCtx.systemPrompt.section({
@@ -332,6 +469,7 @@ function registerSettings(ctx) {
       if (current.toolDescriptions === false) return assembly
       return describeTools(assembly, toolDescriptionHint(current.language))
     })
+    registerLanguageAnchor(settingsCtx, settings)
   })
 }
 

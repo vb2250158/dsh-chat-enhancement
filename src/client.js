@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { AnnotationController, appendAnnotation, annotationLocales } from './annotations.js'
-import { AUTO_LANGUAGE, LANGUAGES, languageEntry } from './languages.js'
+import { AUTO_LANGUAGE, DEFAULT_ANCHOR_MODE, LANGUAGE_ANCHOR_MODES, LANGUAGES, languageAnchorMode, languageEntry } from './languages.js'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 
 const overlayStyle = { position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: '24px', background: 'rgb(0 0 0 / 70%)' }
@@ -296,16 +296,18 @@ const SETTINGS_DEFAULTS = {
   audioAutoplay: false,
   videoAutoplay: false,
   language: AUTO_LANGUAGE,
+  languageAnchor: DEFAULT_ANCHOR_MODE,
   toolDescriptions: true,
   expandReasoningWhileRunning: false,
 }
 
 /**
- * Menu rows projected from the shared catalog. Built once, because the
+ * Menu rows projected from the shared catalogs. Built once, because the
  * primitive only needs `{ id, label }` and a fresh array per render would make
  * its props comparison see a change on every keystroke elsewhere in settings.
  */
 const LANGUAGE_MENU_ITEMS = LANGUAGES.map(language => ({ id: language.id, label: language.label }))
+const ANCHOR_MENU_ITEMS = LANGUAGE_ANCHOR_MODES.map(mode => ({ id: mode.id, label: mode.label }))
 
 /** Resolve one settings snapshot to a complete preference object. */
 function settingsPreferences(snapshot) {
@@ -314,34 +316,41 @@ function settingsPreferences(snapshot) {
 }
 
 /**
- * Themed language picker.
+ * Themed picker for one enum-valued setting.
  *
  * A native `<select>` is not usable here: the browser paints its popup with OS
  * chrome and ignores `--dsw-*` tokens, so the list stays light on a dark theme
  * (and dark on a light one). The list is therefore the DSH `Menu` primitive —
  * the same one the General section's Language row uses — anchored to a
  * token-styled `Button`, which also supplies the hover and disabled states.
+ *
+ * `items` must be a stable array: the primitive compares props for identity, so
+ * a list rebuilt per render would reopen the menu on every unrelated keystroke.
+ * @param field - the settings key this picker writes.
+ * @param items - `{ id, label }` options.
+ * @param labelOf - resolves the selected id to its display label.
+ * @param ariaLabel - the row's accessible name, prefixed to the active label.
  */
-function LanguagePicker({ chatSettings, selected, writable }) {
+function SettingPicker({ chatSettings, field, selected, items, labelOf, ariaLabel, writable }) {
   const [open, setOpen] = React.useState(false)
-  const activeLabel = languageEntry(selected).label
+  const activeLabel = labelOf(selected)
   return React.createElement(Menu, {
     open,
     onClose: () => { setOpen(false) },
-    items: LANGUAGE_MENU_ITEMS,
+    items,
     selectedId: selected,
     align: 'end',
     // The settings panel scrolls and clips; a portal keeps the list from being
     // cropped by that ancestor.
     portal: true,
-    onSelect: (id) => { setOpen(false); void chatSettings.set('language', id) },
+    onSelect: (id) => { setOpen(false); void chatSettings.set(field, id) },
     anchor: React.createElement(Button, {
       variant: 'outline',
       size: 'sm',
       disabled: !writable,
       'aria-haspopup': 'menu',
       'aria-expanded': open,
-      'aria-label': `思考与回复语言：${activeLabel}`,
+      'aria-label': `${ariaLabel}：${activeLabel}`,
       onClick: () => { setOpen(value => !value) },
     }, React.createElement('span', { style: languageTriggerContentStyle },
       React.createElement('span', { style: languageTriggerLabelStyle }, activeLabel),
@@ -365,6 +374,11 @@ function ChatEnhancementSettingsSection({ chatSettings }) {
   // removed by a downgrade) must not blank the picker: resolve it to `auto`,
   // the same fallback the Host applies when it builds the instruction.
   const selected = languageEntry(preferences.language).id
+  const selectedAnchor = languageAnchorMode(preferences.languageAnchor)
+  // With no language constraint there is nothing to drift out of, so the anchor
+  // row cannot do anything. Show it disabled rather than hiding it, so the
+  // setting stays discoverable and the reason is stated in place.
+  const anchorUsable = writable && selected !== AUTO_LANGUAGE
   const toggle = (field, label) => React.createElement('label', { style: settingsRowStyle },
     React.createElement('span', null, label),
     React.createElement('input', { type: 'checkbox', role: 'switch', checked: preferences[field], disabled: !writable, onChange: event => { void chatSettings.set(field, event.target.checked) } }))
@@ -372,8 +386,30 @@ function ChatEnhancementSettingsSection({ chatSettings }) {
     React.createElement('h2', null, '对话增强'),
     React.createElement('div', { style: settingsRowStyle },
       React.createElement('span', null, '思考与回复语言'),
-      React.createElement(LanguagePicker, { chatSettings, selected, writable })),
+      React.createElement(SettingPicker, {
+        chatSettings,
+        field: 'language',
+        selected,
+        items: LANGUAGE_MENU_ITEMS,
+        labelOf: id => languageEntry(id).label,
+        ariaLabel: '思考与回复语言',
+        writable,
+      })),
     React.createElement('p', { style: mutedStyle }, '约束模型思考与回复使用的语言，与「通用设置」里的界面语言互不影响。选择「跟随对话」时不注入任何额外约束。改动从下一个模型步骤起生效，不必重开会话或重启 DSH；代码、路径、命令、日志与引文原文始终保留原样，不翻译。需要在某一轮临时改用别的语言，直接在对话里说即可。极少数对语言指令遵循很弱的模型可能仍用英文思考——那属于模型行为，不是本设置未生效。'),
+    React.createElement('div', { style: settingsRowStyle },
+      React.createElement('span', null, '语言漂移提醒'),
+      React.createElement(SettingPicker, {
+        chatSettings,
+        field: 'languageAnchor',
+        selected: selectedAnchor,
+        items: ANCHOR_MENU_ITEMS,
+        labelOf: id => LANGUAGE_ANCHOR_MODES.find(mode => mode.id === languageAnchorMode(id)).label,
+        ariaLabel: '语言漂移提醒',
+        writable: anchorUsable,
+      })),
+    React.createElement('p', { style: mutedStyle }, anchorUsable
+      ? '系统提示里的语言约束对普通回复通常够用，但长链路任务（连续几十次工具调用）里模型仍可能悄悄换回英文思考。本设置会让插件在每一步开始前检查上一步回复的汉字占比，发现漂移就在下一条消息里补一句目标语言的原话提醒。提醒会留在对话历史里，之后每一步都会连同上下文一起被发送，所以默认只在真的漂移时才触发；「每一步都提醒」更稳但更费上下文，「不提醒」则完全不注入。'
+      : '当前语言是「跟随对话」，没有可漂移的目标语言，这项设置暂不生效。先在上面选定一个具体语言。'),
     React.createElement('h3', { style: settingsGroupStyle }, '思考行'),
     toggle('expandReasoningWhileRunning', '推理中自动展开'),
     React.createElement('p', { style: mutedStyle }, '开启后，思考进行中的 Thinking 行会自动展开显示全文，并跟随最新内容滚动；思考一结束就恢复成默认的折叠摘要。DSH 默认始终把 Thinking 行渲染成一行折叠摘要，本开关只驱动那一行自带的展开控件，因此展开内容、折叠高度和无障碍状态仍由官方渲染器决定。你手动展开过的行不会被自动收起；关闭本开关会收起自动展开的行。'),
