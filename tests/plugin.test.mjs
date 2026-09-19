@@ -67,6 +67,8 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /React\.createElement\('audio'/)
   assert.match(client, /ImagePreviewDialog/)
   assert.match(client, /data-dsh-image-preview/)
+  assert.doesNotMatch(client, /展示图片 ·/)
+  assert.doesNotMatch(client, /attachment\.width\} ×/)
   assert.match(client, /download: current\.name/)
   assert.match(client, /关闭图片预览/)
   assert.match(client, /aria-label': '上一张'/)
