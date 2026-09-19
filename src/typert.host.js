@@ -24,9 +24,9 @@ function descriptor(service, requestSymbol, requestSchema, resultSymbol, resultS
       name: 'request',
       wire: 'request',
       source: 'json',
-      codec: { mode: 'strict', typeSymbol: requestSymbol, create: () => ( requestSchema) },
+      codec: { mode: 'strict', typeSymbol: requestSymbol, schema: requestSchema, create: () => (requestSchema) },
     }],
-    result: { mode: 'strict', typeSymbol: resultSymbol, create: () => ( resultSchema) },
+    result: { mode: 'strict', typeSymbol: resultSymbol, schema: resultSchema, create: () => (resultSchema) },
     sourceLocation: { file: 'src/index.js', line: 92, column: 11 },
   }
 }
