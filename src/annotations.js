@@ -5,12 +5,14 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 /** UI copy follows the locale seat; quoted content remains verbatim. */
 export const annotationLocales = {
   zh: {
+    'model.redirected': '已重定向',
     mark: '批注', quote: '引用原文', note: '批注内容', add: '添加到聊天', cancel: '取消',
     editTitle: '编辑批注', update: '更新批注',
     unavailable: '当前草稿暂不可添加，请退出命令模式或等待提交完成后重试。',
     changed: '草稿或会话已变化，未添加批注。请回到原会话后重试。',
   },
   en: {
+    'model.redirected': 'Redirected',
     mark: 'Annotate', quote: 'Quoted text', note: 'Comment', add: 'Add to chat', cancel: 'Cancel',
     editTitle: 'Edit annotation', update: 'Update annotation',
     unavailable: 'Cannot add to this draft yet. Exit command mode or wait for submission, then try again.',

@@ -769,17 +769,67 @@ function modelForMessage(nodes, messageId) {
 }
 
 /** 展示本轮模型的尾注徽章；取不到模型时不渲染，保持原生尾部不变。 */
-function TurnModelBadge({ messageId, useTrajectory, t }) {
+function TurnModelBadge({ messageId, useTrajectory, useProjection, useModelDirectory, loadModelDirectory, t }) {
+  const redirect = typeof useProjection === 'function' ? useProjection('modelRedirects')?.[messageId] : undefined
+  const groups = useModelDirectory(state => state.groups)
+  React.useEffect(() => {
+    // Directory failures retain the recorded route ids in the badge.
+    void loadModelDirectory().catch(() => {})
+  }, [loadModelDirectory])
   const label = typeof useTrajectory === 'function'
     ? useTrajectory(snapshot => modelForMessage(snapshot?.eventNodes, messageId))
     : null
   if (label === null) return null
-  const detail = [label.provider, label.model, label.reasoningEffort].filter(part => typeof part === 'string' && part !== '')
+  const provider = groups.find(group => group.id === label.provider)
+  const modelName = provider?.models.find(model => model.id === label.model)?.name ?? label.model
+  const providerName = provider?.name ?? label.provider
+  const routeLabel = [modelName, providerName].filter(part => typeof part === 'string' && part !== '').join(' · ')
+  const redirected = redirect?.to.provider === label.provider && redirect?.to.model === label.model
+  const originalProvider = redirected ? groups.find(group => group.id === redirect.from.provider) : undefined
+  const originalLabel = redirected ? [originalProvider?.models.find(model => model.id === redirect.from.model)?.name ?? redirect.from.model,
+    originalProvider?.name ?? redirect.from.provider].join(' · ') : undefined
+  const visibleLabel = redirected ? `${t('model.redirected')} · ${routeLabel}` : routeLabel
+  const routeDetail = redirected ? `${originalLabel} → ${routeLabel}` : routeLabel
   return React.createElement('span', {
     'data-dsh-chat-enhancement': 'turn-model',
-    title: detail.join(' · '),
+    title: [routeDetail, label.reasoningEffort].filter(Boolean).join(' · '),
     style: turnModelStyle,
-  }, label.model)
+  }, visibleLabel)
+}
+
+/** 只读取当前运行轮次内最近一次请求；尚未发起请求时不显示上一轮模型。 */
+function runningModelForRequest(snapshot, startTime) {
+  const requests = snapshot?.requests
+  if (!Array.isArray(requests)) return null
+  let latest = null
+  for (const request of requests) {
+    if (request.purpose !== 'assistant') continue
+    if (startTime === null ? request.status !== 'running' : request.startedAt < startTime) continue
+    if (latest === null || request.startSeq > latest.startSeq) latest = request
+  }
+  const config = latest?.requestConfig
+  return typeof config?.provider === 'string' && typeof config?.model === 'string' ? latest : null
+}
+
+/** 运行状态模型来自请求头，工具执行期间保留该轮最近一次实际调用。 */
+function RunningModelBadge({ startTime, useTrajectory, useProjection, useModelDirectory, loadModelDirectory, t }) {
+  const request = useTrajectory(snapshot => runningModelForRequest(snapshot, startTime))
+  const runningRedirect = typeof useProjection === 'function' ? useProjection('runningModelRedirect') : null
+  const groups = useModelDirectory(state => state.groups)
+  React.useEffect(() => { void loadModelDirectory().catch(() => {}) }, [loadModelDirectory])
+  if (request === null) return null
+  const route = request.requestConfig
+  const provider = groups.find(group => group.id === route.provider)
+  const label = `${provider?.models.find(model => model.id === route.model)?.name ?? route.model} · ${provider?.name ?? route.provider}`
+  const redirect = runningRedirect != null && runningRedirect.turn === request.turn && runningRedirect.step === request.step ? runningRedirect.record : null
+  const redirected = redirect?.to.provider === route.provider && redirect?.to.model === route.model
+  const originalProvider = redirected ? groups.find(group => group.id === redirect.from.provider) : undefined
+  const detail = redirected ? `${originalProvider?.models.find(model => model.id === redirect.from.model)?.name ?? redirect.from.model} · ${originalProvider?.name ?? redirect.from.provider} → ${label}` : label
+  return React.createElement('span', {
+    'data-dsh-chat-enhancement': 'running-model',
+    title: [detail, route.reasoningEffort].filter(Boolean).join(' · '),
+    style: turnModelStyle,
+  }, redirected ? `${t('model.redirected')} · ${label}` : label)
 }
 
 const requestSchema = { parse(value) {
@@ -811,7 +861,7 @@ const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
   },
 ] }
 
-export const inject = ['slots', 'sessions', 'remote', 'settingsScope', 'conversation', 'locale']
+export const inject = ['slots', 'sessions', 'remote', 'settingsScope', 'conversation', 'locale', 'modelDirectories']
 
 export async function apply(ctx) {
   ctx.effect(() => ctx.locale.register('chat-enhancement-annotations', annotationLocales))
@@ -854,8 +904,30 @@ export async function apply(ctx) {
   }, props => React.createElement(AnnotationController, { ...props, key: props.sessionId })))
   // 追加到已定稿 assistant 消息的操作行（list 槽位按 id 追加，不替换 DSH 原生操作）。
   const TurnModelAction = props => React.createElement(TurnModelBadge, { ...props, key: props.messageId })
+  ctx.slots.inject('conversation.chat.running-status', () => ctx.slots.register({
+    name: 'conversation.chat.running-status', id: 'chat-enhancement-running-model', order: 20,
+    locale: 'chat-enhancement-annotations',
+    inject: sessionId => {
+      const directory = ctx.modelDirectories.directoryFor(sessionId)
+      return {
+        hooks: { modelDirectory: directory.store },
+        loadModelDirectory: async () => {
+          if (directory.store.getSnapshot().status === 'idle') await directory.load()
+        },
+      }
+    },
+  }, RunningModelBadge))
   ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
-    name: 'conversation.chat.assistant-actions', id: 'chat-enhancement-turn-model', order: 20,
+    name: 'conversation.chat.assistant-actions', id: 'chat-enhancement-turn-model', order: 20, locale: 'chat-enhancement-annotations',
+    inject: sessionId => {
+      const directory = ctx.modelDirectories.directoryFor(sessionId)
+      return {
+        hooks: { modelDirectory: directory.store },
+        loadModelDirectory: async () => {
+          if (directory.store.getSnapshot().status === 'idle') await directory.load()
+        },
+      }
+    },
   }, TurnModelAction))
   // 一个导航项装下本插件的全部偏好：语言在上，媒体展示在下。
   ctx.slots.inject('settings.section', () => ctx.slots.register({

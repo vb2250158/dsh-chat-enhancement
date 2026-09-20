@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.3.35",
+  "version": "0.3.36",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
   "main": "lib/index.js",
@@ -13,6 +13,7 @@
   "dsh": {
     "client": {
       "inject": [
+        "@deepseek-ai/dsh-client-ui-model-selection",
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-primitives",
