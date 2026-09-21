@@ -1,10 +1,11 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.3.37",
+  "version": "0.3.38",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
+    "./image-attachments": "./src/image-attachments.js",
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./typert": "./lib/typert.host.js",
@@ -27,6 +28,7 @@
     }
   },
   "peerDependencies": {
+    "@deepseek-ai/dsh-attachment-local": ">=0.1.5-rc.2",
     "@deepseek-ai/cordis": ">=4.0.1",
     "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.8 || >=0.1.0-alpha.0",
     "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.8 || >=0.1.0-alpha.0",
@@ -37,9 +39,13 @@
     "react": "^18.2.0"
   },
   "files": [
+    "scripts/recover-sessions.mjs",
+    "src/question-content.js",
     "src/session-recovery.js",
     "src/session-recovery-client.js",
-    "scripts/recover-sessions.mjs",
+    "src/background-jobs.js",
+    "src/image-attachments.js",
+    "src/image-type.js",
     "lib/index.js",
     "lib/client.js",
     "lib/typert.host.js",

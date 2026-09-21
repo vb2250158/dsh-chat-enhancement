@@ -1,6 +1,7 @@
 /** Browser entry for the chat-enhancement DSH bundle. */
 
 import * as React from 'react'
+import { QuestionRichContent, questionContentLocales, questionContentCss } from './question-content.js'
 import { recoveryDescriptor, recoveryLocales, recoveryCss, SessionRecoveryPrompt } from './session-recovery-client.js'
 import { AnnotationController, appendAnnotation, annotationLocales } from './annotations.js'
 import { AUTO_LANGUAGE, DEFAULT_ANCHOR_MODE, LANGUAGE_ANCHOR_MODES, LANGUAGES, languageAnchorMode, languageEntry } from './languages.js'
@@ -311,6 +312,7 @@ const SETTINGS_DEFAULTS = {
   languageAnchor: DEFAULT_ANCHOR_MODE,
   toolDescriptions: true,
   expandReasoningWhileRunning: false,
+  reasoningCollapseDelayMs: 3000,
 }
 
 /**
@@ -393,7 +395,7 @@ function ChatEnhancementSettingsSection({ chatSettings }) {
   const anchorUsable = writable && selected !== AUTO_LANGUAGE
   const toggle = (field, label) => React.createElement('label', { style: settingsRowStyle },
     React.createElement('span', null, label),
-    React.createElement('input', { type: 'checkbox', role: 'switch', checked: preferences[field], disabled: !writable, onChange: event => { void chatSettings.set(field, event.target.checked) } }))
+    React.createElement(Switch, { label, checked: preferences[field], disabled: !writable, onChange: checked => { void chatSettings.set(field, checked) } }))
   return React.createElement('section', { style: settingsSectionStyle },
     React.createElement('h2', null, '对话增强'),
     React.createElement('div', { style: settingsRowStyle },
@@ -424,10 +426,10 @@ function ChatEnhancementSettingsSection({ chatSettings }) {
       : '当前语言是「跟随对话」，没有可漂移的目标语言，这项设置暂不生效。先在上面选定一个具体语言。'),
     React.createElement('h3', { style: settingsGroupStyle }, '思考行'),
     toggle('expandReasoningWhileRunning', '推理中自动展开'),
-    React.createElement('p', { style: mutedStyle }, '开启后，思考进行中的 Thinking 行会自动展开显示全文，并跟随最新内容滚动；思考一结束就恢复成默认的折叠摘要。DSH 默认始终把 Thinking 行渲染成一行折叠摘要，本开关只驱动那一行自带的展开控件，因此展开内容、折叠高度和无障碍状态仍由官方渲染器决定。你手动展开过的行不会被自动收起；关闭本开关会收起自动展开的行。'),
-    React.createElement('h3', { style: settingsGroupStyle }, '工具行'),
+    React.createElement('p', { style: mutedStyle }, `开启后，推理中的 Thinking 行自动展开；推理结束后保持 ${preferences.reasoningCollapseDelayMs / 1000} 秒，再自动折叠。手动展开的行保持展开；关闭本开关会立即收起自动展开的行。`),
+    React.createElement('h3', { style: settingsGroupStyle }, '工具行与后台任务'),
     toggle('toolDescriptions', '显示模型自述的本次调用说明'),
-    React.createElement('p', { style: mutedStyle }, '给每个工具声明一个可选的 description 参数，模型就会用一句话说明这次调用要做什么，显示在对话界面的工具行上（bash 一直是这么显示的）。这一半由本插件完成；界面显示部分还需要仓库 patches/ 里的官方补丁并重新构建客户端——没打补丁时模型仍会填写，但工具行只显示原来的路径或参数。'),
+    React.createElement('p', { style: mutedStyle }, '让模型用 description 说明本次调用。后台 bash、pwsh 任务优先显示这句说明，悬停可查看原命令；缺少说明时显示命令。后台列表由插件提供，普通工具行的说明显示仍需 patches/ 中的官方补丁。'),
     React.createElement('h3', { style: settingsGroupStyle }, '媒体展示'),
     toggle('audioAutoplay', 'Agent 展示音频时自动播放'),
     toggle('videoAutoplay', 'Agent 展示视频时自动播放'),
@@ -702,7 +704,7 @@ function collapseSettledThinkRow(row) {
 
 /**
  * Drive `推理中自动展开`: open each Think row while its reasoning is streaming
- * and restore the collapsed summary as soon as it settles.
+ * and restore the collapsed summary after the configured settling delay.
  *
  * DSH renders every Think row collapsed — the streaming tail follows the
  * latest reasoning line inside a fixed-height summary (`ReasoningRow`). This
@@ -715,6 +717,7 @@ function collapseSettledThinkRow(row) {
 function ReasoningAutoExpandController({ chatSettings }) {
   const preferences = settingsPreferences(useSettingsSnapshot(chatSettings))
   const enabled = preferences.expandReasoningWhileRunning === true
+  const delayMs = preferences.reasoningCollapseDelayMs
   React.useEffect(() => {
     if (!enabled) {
       // Turning the preference off closes only the rows this controller opened;
@@ -725,6 +728,7 @@ function ReasoningAutoExpandController({ chatSettings }) {
       return undefined
     }
     let frame = null
+    const collapseQueue = createReasoningCollapseQueue(delayMs)
     const schedule = () => {
       if (frame !== null) return
       frame = requestAnimationFrame(() => {
@@ -733,10 +737,7 @@ function ReasoningAutoExpandController({ chatSettings }) {
       })
     }
     const sync = () => {
-      for (const row of document.querySelectorAll('[data-variant="think"]')) {
-        if (row.dataset.state === 'running') expandRunningThinkRow(row)
-        else collapseSettledThinkRow(row)
-      }
+      collapseQueue.sync(document.querySelectorAll('[data-variant="think"]'))
     }
     const observer = new MutationObserver(schedule)
     // `subtree` on the flow column: a Think row appears, flips to `running`,
@@ -746,13 +747,47 @@ function ReasoningAutoExpandController({ chatSettings }) {
     return () => {
       observer.disconnect()
       if (frame !== null) cancelAnimationFrame(frame)
+      collapseQueue.dispose()
     }
-  }, [enabled])
+  }, [enabled, delayMs])
   return null
 }
 
 function ReasoningAutoExpandSlot(props) {
   return React.createElement(ReasoningAutoExpandController, props)
+}
+
+/** 每行只从首次结束时计时；重新推理、移除或卸载时取消折叠。 */
+function createReasoningCollapseQueue(delayMs) {
+  const timers = new Map()
+  const cancel = row => {
+    if (!timers.has(row)) return
+    clearTimeout(timers.get(row))
+    timers.delete(row)
+  }
+  return {
+    sync(rows) {
+      const visible = new Set(rows)
+      for (const row of timers.keys()) if (!visible.has(row)) cancel(row)
+      for (const row of visible) {
+        if (row.dataset.state === 'running') {
+          cancel(row)
+          expandRunningThinkRow(row)
+        } else if (!thinkRowExpanded(row)) {
+          cancel(row)
+          autoExpandedThinkRows.delete(row)
+        } else if (autoExpandedThinkRows.has(row) && !timers.has(row)) {
+          timers.set(row, setTimeout(() => {
+            timers.delete(row)
+            if (row.isConnected && row.dataset.state !== 'running') collapseSettledThinkRow(row)
+          }, delayMs))
+        }
+      }
+    },
+    dispose() {
+      for (const row of timers.keys()) cancel(row)
+    },
+  }
 }
 
 /** 本轮实际使用的模型取自 Trajectory 的 assistant 节点 requestConfig（含 messageId）。 */
@@ -866,14 +901,19 @@ const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
 export const inject = ['slots', 'sessions', 'remote', 'settingsScope', 'conversation', 'locale', 'modelDirectories']
 
 export async function apply(ctx) {
+  ctx.effect(() => ctx.locale.register('chat-enhancement-question-content', questionContentLocales))
+  ctx.slots.inject('proactive.question.content', () => ctx.slots.register({
+    name: 'proactive.question.content', priority: 100, locale: 'chat-enhancement-question-content',
+  }, QuestionRichContent))
   ctx.effect(() => ctx.locale.register('chat-enhancement-recovery', recoveryLocales))
+  ctx.effect(() => ctx.locale.register('chat-enhancement-annotations', annotationLocales))
+  ctx.effect(() => ctx.locale.register('chat-enhancement-jobs', backgroundJobLocales))
   ctx.effect(() => {
     const style = document.createElement('style')
-    style.textContent = recoveryCss
+    style.textContent = backgroundJobCss + recoveryCss + questionContentCss
     document.head.appendChild(style)
     return () => style.remove()
   })
-  ctx.effect(() => ctx.locale.register('chat-enhancement-annotations', annotationLocales))
   const dispose = await ctx.remote.$mount(previewRemote)
   const recoveryService = ctx.reflect.get('remote.chatRecovery')
   const readRecovery = async request => {
@@ -887,6 +927,10 @@ export async function apply(ctx) {
   }, SessionRecoveryPrompt))
   const sessions = ctx.get('sessions')
   const chatSettings = ctx.settingsScope.bind({ namespace: 'chat-enhancement' })
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions', id: 'job-list', priority: 100, order: 20,
+    locale: 'chat-enhancement-jobs', inject: () => ({ chatSettings }),
+  }, BackgroundJobList))
   const mediaService = ctx.reflect.get('remote.chatMedia')
   const markdownService = ctx.reflect.get('remote.chatMarkdown')
   if (sessions === undefined || mediaService?.read === undefined || markdownService?.read === undefined) throw new Error('dsh-chat-enhancement preview services are unavailable.')

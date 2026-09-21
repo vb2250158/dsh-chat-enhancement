@@ -8,16 +8,20 @@ const strip = source => source
 // later module must be able to read at evaluation time.
 const languages = strip(await readFile(new URL('src/languages.js', root), 'utf8'))
 const annotations = strip(await readFile(new URL('src/annotations.js', root), 'utf8'))
+const backgroundJobs = strip(await readFile(new URL('src/background-jobs.js', root), 'utf8'))
 const recoveryClient = strip(await readFile(new URL('src/session-recovery-client.js', root), 'utf8'))
+const questionContent = strip(await readFile(new URL('src/question-content.js', root), 'utf8'))
 const client = strip(await readFile(new URL('src/client.js', root), 'utf8'))
 await writeFile(new URL('lib/client.js', root), `window.__ModuleLoader__.load({
   id: 'dsh-chat-enhancement',
   factory: (require) => {
     const React = require('react')
-    const { MarkdownText, Button, Menu, IconChevronDownOutline14 } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { MarkdownText, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
 ${languages}
 ${annotations}
+${backgroundJobs}
 ${recoveryClient}
+${questionContent}
 ${client}
     return { inject, apply, createMediaAutoplayGate, modelForMessage, thinkRowTarget, thinkRowExpanded, expandRunningThinkRow, collapseSettledThinkRow }
   },

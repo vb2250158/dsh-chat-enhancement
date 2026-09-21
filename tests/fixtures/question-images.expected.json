@@ -1,0 +1,8 @@
+{
+  "images": [
+    { "alt": "总览", "src": "https://images.test/overview.png" },
+    { "alt": "细节", "src": "https://harness.test/api/file?path=C%3A%2Fmock%20folder%2Fdetail.png" },
+    { "alt": "方案图", "src": "https://images.test/a.png" }
+  ],
+  "choices": ["方案 A", "方案 B"]
+}

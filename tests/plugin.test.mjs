@@ -28,8 +28,8 @@ async function loadBrowserPlugin() {
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
   let loaderEntry
   vm.runInNewContext(client, {
-    document: { createElement: () => ({ remove() {} }), head: { appendChild() {} } },
     window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
+    document: { createElement: () => ({ remove() {} }), head: { appendChild() {} } },
   })
   return loaderEntry.factory((name) => {
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
@@ -98,7 +98,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   // 原生 <select> 的弹层由系统绘制，`--dsw-*` 令牌管不到它，所以必须走 Menu 原语。
   assert.doesNotMatch(client, /createElement\('select'/)
   assert.doesNotMatch(client, /languageSelectStyle/)
-  assert.match(client, /const \{ MarkdownText, Button, Menu, IconChevronDownOutline14 \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
+  assert.match(client, /const \{ MarkdownText, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
   assert.match(client, /variant: 'outline'/)
   assert.match(client, /aria-haspopup': 'menu'/)
   assert.match(client, /audioAutoplay/)
@@ -270,7 +270,7 @@ test('client groups original tool and context rows without replacing the tool-ca
   const registrations = []
   const context = {
     effect(callback) { callback() },
-    locale: { register(namespace, dictionaries) { assert.ok(['chat-enhancement-annotations', 'chat-enhancement-recovery'].includes(namespace)); assert.ok(dictionaries.en); return () => {} } },
+    locale: { register(namespace, dictionaries) { assert.ok(['chat-enhancement-question-content', 'chat-enhancement-annotations', 'chat-enhancement-jobs', 'chat-enhancement-recovery'].includes(namespace)); assert.ok(dictionaries.en); return () => {} } },
     remote: { async $mount() { return () => {} } },
     get(name) { return name === 'sessions' ? { binding() {} } : undefined },
     reflect: { get(name) {
@@ -296,6 +296,10 @@ test('client groups original tool and context rows without replacing the tool-ca
 
   await plugin.apply(context)
   assert.ok(plugin.inject.includes('settingsScope'))
+  const jobList = registrations.find(({ options }) => options.id === 'job-list')
+  assert.equal(jobList.options.name, 'conversation.session.header.actions')
+  assert.equal(jobList.options.priority, 100)
+  assert.equal(jobList.component.name, 'BackgroundJobList')
   assert.equal(registrations.some(({ options }) => options.name === 'conversation.chat.node'), false)
   const autoplayController = registrations.find(({ options }) => options.id === 'chat-enhancement-media-autoplay-session')
   assert.equal(autoplayController.options.name, 'conversation.input.dock')
@@ -483,6 +487,7 @@ function thinkRowStub(state) {
   }
   const target = new Target()
   const row = {
+    isConnected: true,
     dataset: { variant: 'think', state },
     querySelector(selector) {
       return selector === '[data-disclosure-row][data-expandable]' ? target : null
@@ -495,7 +500,8 @@ function thinkRowStub(state) {
 async function loadAutoExpandHelpers() {
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
   let loaderEntry
-  vm.runInNewContext(client, {
+  vm.runInNewContext(client.replace('return { inject, apply,', 'return { createReasoningCollapseQueue, inject, apply,'), {
+    setTimeout, clearTimeout,
     HTMLElement: HTMLElementStub,
     window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
   })
@@ -541,6 +547,74 @@ test('推理中自动展开只开流式中的行，并在结算后收起自己�
   assert.equal(thinkRowTarget(inert), null)
   expandRunningThinkRow(inert)
   collapseSettledThinkRow(inert)
+})
+
+test('推理完成保持 3 秒，重复更新不重置折叠计时', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { createReasoningCollapseQueue, thinkRowExpanded } = await loadAutoExpandHelpers()
+  const queue = createReasoningCollapseQueue(3000)
+  const { row, target } = thinkRowStub('running')
+  queue.sync([row])
+  row.dataset.state = 'ok'
+  queue.sync([row])
+  t.mock.timers.tick(2999)
+  queue.sync([row])
+  assert.equal(thinkRowExpanded(row), true)
+  t.mock.timers.tick(1)
+  assert.equal(thinkRowExpanded(row), false)
+  assert.equal(target.clicks, 2)
+  queue.dispose()
+})
+
+test('再次推理重新计时，移除或卸载取消未完成折叠', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { createReasoningCollapseQueue, thinkRowExpanded } = await loadAutoExpandHelpers()
+  const queue = createReasoningCollapseQueue(3000)
+  const { row } = thinkRowStub('running')
+  queue.sync([row])
+  row.dataset.state = 'ok'
+  queue.sync([row])
+  t.mock.timers.tick(1000)
+  row.dataset.state = 'running'
+  queue.sync([row])
+  t.mock.timers.tick(3000)
+  assert.equal(thinkRowExpanded(row), true)
+  row.dataset.state = 'ok'
+  queue.sync([row])
+  t.mock.timers.tick(2999)
+  assert.equal(thinkRowExpanded(row), true)
+  t.mock.timers.tick(1)
+  assert.equal(thinkRowExpanded(row), false)
+  for (const remove of [() => queue.sync([]), () => queue.dispose()]) {
+    row.dataset.state = 'running'
+    queue.sync([row])
+    row.dataset.state = 'ok'
+    queue.sync([row])
+    remove()
+    t.mock.timers.tick(3000)
+    assert.equal(thinkRowExpanded(row), true)
+    delete row.dataset.expanded
+  }
+})
+
+test('手动展开保持原样，关闭功能可立即收起自动展开行', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { createReasoningCollapseQueue, collapseSettledThinkRow, thinkRowExpanded } = await loadAutoExpandHelpers()
+  const queue = createReasoningCollapseQueue(3000)
+  const manual = thinkRowStub('running').row
+  manual.dataset.expanded = ''
+  const automatic = thinkRowStub('running').row
+  queue.sync([manual, automatic])
+  manual.dataset.state = automatic.dataset.state = 'ok'
+  queue.sync([manual, automatic])
+  t.mock.timers.tick(1000)
+  queue.dispose()
+  collapseSettledThinkRow(manual)
+  collapseSettledThinkRow(automatic)
+  assert.equal(thinkRowExpanded(manual), true)
+  assert.equal(thinkRowExpanded(automatic), false)
+  t.mock.timers.tick(3000)
+  assert.equal(thinkRowExpanded(manual), true)
 })
 
 test('language anchors fire only when the reply language has actually drifted', async () => {

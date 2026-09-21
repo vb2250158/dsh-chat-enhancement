@@ -450,6 +450,7 @@ function registerSettings(ctx) {
       // disclosure while reasoning streams. The Host only persists it, because
       // a browser-local store would not survive a reload or reach another tab.
       expandReasoningWhileRunning: z.boolean().default(false),
+      reasoningCollapseDelayMs: z.number().min(0).step(1).default(3000),
       language: z.string().default(AUTO_LANGUAGE),
       // The allowed ids come from the shared catalog, so the browser picker and
       // this validator cannot disagree about what a valid mode is. The Host
