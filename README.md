@@ -1,5 +1,13 @@
 # DSH Chat Enhancement
 
+## 0.3.42：自动续跑中断迭代
+
+宿主启动后自动扫描并恢复最近中断的会话，不投递恢复提示。已有活动目标复用官方目标迭代；普通会话与可续作子会话使用 `continueInterrupted`，保留原会话及父子关系。手动暂停、取消、完成、已有队列及运行中的任务不重复启动。`recoveryAutoResume` 默认为 `true`，可在插件配置中关闭。
+
+需要配套宿主公开续跑能力，补丁在 `host-patches/prompt-free-recovery.patch`。缺少能力时报告恢复失败，不回退为提示投递。已存在的恢复消息保留在历史中。
+
+The Host automatically resumes interrupted sessions without a recovery prompt. Active goals reuse the official goal driver; ordinary and continuable child sessions retain their original identities through `continueInterrupted`. Paused, cancelled, completed, queued and running work is not restarted. The required Host patch is bundled; unsupported drivers fail explicitly. Set `recoveryAutoResume: false` to disable automatic recovery.
+
 ## 0.3.41：停止重复分组刷新
 
 操作与思考分组仅更新变化的文字、属性和样式；忽略两个分组自身的按钮变更及聊天以外的 DOM 更新，避免互相触发扫描。推理自动展开仅监听状态与展开属性，不再被其他插件的样式写入触发。
@@ -64,7 +72,7 @@ check 等待检查结束，recover 自动确认一次并等待批次结束；默
 
 调用示例：`queue_user_question({"questions":[{"id":"layout","question":"选择哪个布局？","detail":"下面是整体位置。\n\n![整体](https://example.com/overview.png)\n\n请比较两种布局。","options":[{"label":"方案 A","description":"按钮靠左。\n\n![方案 A](https://example.com/a.png)\n\n适合单手操作。"},{"label":"方案 B","description":"按钮居中。\n\n![方案 B](https://example.com/b.png)"}]}]})`。
 
-- DSH 启动后首次进入网页，后台检查启动前一小时内意外中断的会话。检查期间不阻塞页面；发现候选后，在会话列表底部、设置入口上方显示一行「是否恢复意外中断会话 ✓ ×」。勾选向原会话提交续作请求，叉号忽略当前插件实例的恢复提示；刷新页面和多标签页共享同一批次状态。
+- DSH 启动后自动检查启动前一小时内意外中断的会话，并在原会话直接续跑，不投递恢复消息。检查不阻塞页面；多标签页共享同一批次，失败项保留重试入口。关闭 `recoveryAutoResume` 后可手动检查和恢复。
 - 已完成、主动取消、正在运行、已有排队输入及一次性子会话不会重复恢复。可续作子会话通过原父会话地址恢复；无法挂载的父会话、读取失败和部分恢复失败保留重试入口。恢复成功指请求已接收，不代表原任务已完成。窄侧栏隐藏该行，展开后显示。
 - 在 `chat-enhancement` 插件的 `config` 中可调整 `recoveryLookbackMs`（默认 `3600000`）、`recoveryPollIntervalMs`（默认 `1500`）和 `recoveryReadTimeoutMs`（默认 `30000`），均为正整数毫秒。检查按会话逐一异步读取日志；不会改写历史记录。此功能包含 Host 服务，安装后须重启 DSH 并刷新网页。
 

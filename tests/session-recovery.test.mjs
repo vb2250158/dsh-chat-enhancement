@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { SessionRecovery, interruptedCandidate, recoveryConfig } from '../src/session-recovery.js'
+import { SessionRecovery, interruptedCandidate, recoveryConfig, resumeInterruptedGoal } from '../src/session-recovery.js'
 
 const bootAt = 10000000
 function observation(id, { reason = 'interrupted', parentId, time = bootAt - 1000, inheritedEventCount = 0 } = {}) {
@@ -22,10 +22,10 @@ function fixture(items = [observation('root')]) {
       async observeSession(id) { reads++; if (!values.has(id)) throw new Error('missing'); return values.get(id) },
     },
     sessionController: {
-      async resolveAgent(id) { agents.set(id, { status: 'idle', inbox: { nextTurn: [], nextStep: [] } }); return { agent: agents.get(id) } },
+      async resolveAgent(id) { agents.set(id, { id, status: 'idle', inbox: { nextTurn: [], nextStep: [] }, continueInterrupted(startSeq) { prompts.push({ sessionId: id, startSeq }); if (fail) throw new Error('rejected'); return true } }); return { agent: agents.get(id) } },
       async prompt(request) { prompts.push(request); if (fail) throw new Error('rejected'); return { accepted: true } },
     },
-    subagents: { async prompt(request) { assert.ok(agents.has(request.parentSessionId)); prompts.push(request); agents.set(request.childSessionId, { status: 'running', inbox: { nextTurn: [], nextStep: [] } }); return { messageId: 'ok' } } },
+    subagents: { async continueInterrupted(parent, childSessionId, startSeq) { assert.ok(parent); prompts.push({ parentSessionId: parent.id, childSessionId, startSeq }); agents.set(childSessionId, { id: childSessionId, status: 'running', inbox: { nextTurn: [], nextStep: [] } }); return true } },
   }
   const recovery = new SessionRecovery(ctx, {}, bootAt)
   return { recovery, ctx, values, agents, prompts, reads: () => reads, fail(value) { fail = value } }
@@ -60,13 +60,13 @@ test('重启后挂载追加的 end-seed 不掩盖之前的中断轮次', () => {
   value.events.push({ type: 'user/message', seq: 3, time: bootAt + 1001, data: {} })
   assert.equal(interruptedCandidate(value, bootAt, 3600000), undefined)
 })
-test('两次确认只提交一次；失败沿用 requestId 重试，成功项不再提交', async () => {
+test('两次确认只提交一次；失败沿用轮次身份重试，成功项不再提交', async () => {
   const f = fixture(); f.recovery.read({ action: 'check' }); await f.recovery.work
   const request = { action: 'recover', batchId: f.recovery.batchId }
   f.fail(true); f.recovery.read(request); f.recovery.read(request); await f.recovery.work
   assert.equal(f.prompts.length, 1); assert.equal(f.recovery.phase, 'failed')
   f.fail(false); f.recovery.read(request); await f.recovery.work
-  assert.equal(f.prompts.length, 2); assert.equal(f.prompts[0].requestId, f.prompts[1].requestId)
+  assert.equal(f.prompts.length, 2); assert.equal(f.prompts[0].startSeq, f.prompts[1].startSeq)
   assert.equal(f.recovery.phase, 'done')
   f.recovery.read(request); await f.recovery.work; assert.equal(f.prompts.length, 2)
 })
@@ -96,4 +96,37 @@ test('读取失败可重试；卸载取消尚未开始的检查', async () => {
   assert.equal(f.recovery.phase, 'done'); assert.equal(f.prompts.length, 1)
   const stopped = fixture(); stopped.recovery.read({ action: 'check' }); await stopped.recovery.dispose()
   assert.equal(stopped.reads(), 0)
+})
+
+
+test('现有活动目标直接恢复迭代，不投递消息，不越过暂停和轮数上限', () => {
+  const agent = { followup() { throw new Error('must not prompt') } }
+  let goal, calls = []
+  const goals = { get: () => goal, resume: (owner, ref) => calls.push({ owner, ref }) }
+  assert.equal(resumeInterruptedGoal(goals, agent), 'absent')
+  goal = { id: 'goal-1', revision: 4, phase: 'active', activation: 'disarmed', roundsStarted: 1, maxGoalRounds: 5 }
+  assert.equal(resumeInterruptedGoal(goals, agent), 'resumed')
+  assert.deepEqual(calls, [{ owner: agent, ref: { id: 'goal-1', revision: 4 } }])
+  goal.activation = 'armed'
+  assert.equal(resumeInterruptedGoal(goals, agent), 'resumed')
+  assert.equal(calls.length, 1)
+  for (const phase of ['paused', 'blocked', 'complete']) {
+    goal.phase = phase
+    assert.equal(resumeInterruptedGoal(goals, agent), 'held')
+  }
+  goal.phase = 'active'; goal.roundsStarted = 5
+  assert.equal(resumeInterruptedGoal(goals, agent), 'held')
+  assert.equal(calls.length, 1)
+})
+
+
+test('宿主启动自动扫描并续跑，关闭配置时仍可手动检查', async () => {
+  const f = fixture(); f.recovery.startAutomatic(); f.recovery.startAutomatic()
+  await f.recovery.work
+  assert.equal(f.recovery.phase, 'done'); assert.equal(f.prompts.length, 1)
+  assert.equal(f.prompts[0].content, undefined)
+  const disabled = fixture(); disabled.recovery.config.recoveryAutoResume = false
+  disabled.recovery.startAutomatic(); await disabled.recovery.work
+  assert.equal(disabled.reads(), 0)
+  assert.equal(disabled.recovery.phase, 'idle')
 })

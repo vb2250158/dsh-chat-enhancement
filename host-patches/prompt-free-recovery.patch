@@ -1,0 +1,324 @@
+--- a/packages/core/agent/src/runtime-types.ts
++++ b/packages/core/agent/src/runtime-types.ts
+@@ -222,6 +222,15 @@
+     followup(message: UserMessage): void
+
+     /**
++     * Resume an interrupted turn's work in a new turn without adding model input.
++     * Optional for alternative drivers. Busy agents, changed turns and voluntary stops reject.
++     * @param startSeq - exact interrupted turn/start sequence observed by the caller.
++     * @returns whether a driver was started synchronously.
++     */
++    continueInterrupted?(startSeq: number): boolean
++
++
++    /**
+    * Submit steering for the nearest step. An idle driver starts a turn;
+    * a running driver consumes it at its next step boundary.
+    * A rejected step leaves steering parked in the inbox until the next
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -46,7 +46,7 @@
+     lastTurn: number
+     wakeRequested: boolean
+   }
+-  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean }
++  | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean; continueWithoutInput: boolean }
+
+ type StepEndReason = Extract<TurnEndReason, { kind: 'completed' | 'max-tokens' }>
+
+@@ -138,6 +138,18 @@
+     this.send(input, 'next-turn', true)
+   }
+
++  continueInterrupted(startSeq: number): boolean {
++    if (this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle' || this.inbox.hasPending) return false
++    const events = this.session.snapshotEvents()
++    const start = events.findLast(event => event.type === 'turn/start')
++    if (!start || start.seq !== startSeq) return false
++    const end = events.findLast(event => event.type === 'turn/end' && event.seq > startSeq)
++    if (end?.type === 'turn/end' && end.data.reason.kind !== 'interrupted') return false
++    if (events.some(event => event.type === 'user/message' && end !== undefined && event.seq > end.seq)) return false
++    this.wakeDriver(false, true)
++    return true
++  }
++
+   steer(input: UserMessage): void {
+     this.send(input, 'next-step', true)
+   }
+@@ -184,7 +196,7 @@
+    * @param wakeAfterAbort - the {@link send} classification, captured before
+    *   the inbox insertion so a reentrant cancel cannot reclassify it.
+    */
+-  private wakeDriver(wakeAfterAbort = false): void {
++  private wakeDriver(wakeAfterAbort = false, continueWithoutInput = false): void {
+     if (this.phase.kind !== 'idle') {
+       // Maintenance and aborted drivers cannot deliver the wake: latch it for
+       // replay at convergence. Live drivers claim queued work themselves;
+@@ -203,6 +215,7 @@
+       turn: this.phase.lastTurn,
+       step: 0,
+       wakeRequested: false,
++      continueWithoutInput,
+     })
+     this.loopCtx.agents.withInitiator(this, () => this.kick()).then(driver.resolve, driver.reject)
+   }
+@@ -271,6 +284,8 @@
+       this.throwError(new Error(`agent "${this.id}": turn without driver reservation`))
+     }
+     const phase = this.phase
++    const continueWithoutInput = phase.continueWithoutInput
++    phase.continueWithoutInput = false
+     const { signal } = phase.abort
+     signal.throwIfAborted()
+     const turn = phase.turn + 1
+@@ -294,7 +309,7 @@
+         if (turnEnds && decision.messages.length === 0) break
+         // A removed waking message or an enter decision rewritten to empty
+         // still owns the initial turn boundary, but it spends no model call.
+-        if (phase.step === 0 && decision.messages.length === 0) {
++        if (phase.step === 0 && decision.messages.length === 0 && !continueWithoutInput) {
+           turnEnds = { kind: 'completed' }
+           return false
+         }
+--- a/packages/subagent/subagent/src/continuation.ts
++++ b/packages/subagent/subagent/src/continuation.ts
+@@ -407,14 +407,20 @@
+     content: ContentBlock[],
+     options: ChildDeliveryOptions,
+   ): Promise<MessageId> {
++    const activation = await this.materializeChild(parent, childId, options.signal)
++    return await this.submitMaterialized(activation, content, options, parent)
++  }
++
++  /** Rebuild a persisted child's existing provider and parent ownership. */
++  private async materializeChild(parent: Agent, childId: SessionId, signal: AbortSignal): Promise<Activation> {
+     const query = this.requireSessionQuery()
+     let observation: SessionObservation
+     try {
+       observation = await query.observeSession(childId, {
+-        signal: options.signal,
++        signal: signal,
+       })
+     } catch (error: unknown) {
+-      options.signal.throwIfAborted()
++      signal.throwIfAborted()
+       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
+     }
+     using source = observation
+@@ -443,14 +449,38 @@
+             : {},
+         },
+         composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
+-        signal: options.signal,
++        signal: signal,
+       })
+     } catch (error: unknown) {
+-      options.signal.throwIfAborted()
++      signal.throwIfAborted()
+       if (error instanceof SubagentError) throw error
+       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
+     }
+-    return await this.submitMaterialized(activation, content, options, parent)
++    return activation
++  }
++
++  /** Resume interrupted work under the existing parent without a prompt or a new child. */
++  async continueInterrupted(parent: Agent, childId: SessionId, startSeq: number, signal: AbortSignal): Promise<boolean> {
++    if (this.ctx.agents.get(parent.id) !== parent) throw new SubagentError('Parent is not live', 'UNAUTHORIZED')
++    this.activations.assertAdmitting(parent)
++    const releaseHold = this.activations.holdOwnership(parent, childId)
++    try {
++      return await this.activations.locks.run(childId, async () => {
++        signal.throwIfAborted()
++        const activation = this.activations.get(childId) ?? await this.materializeChild(parent, childId, signal)
++        this.activations.assertAdmitting(parent)
++        this.activations.authorizeLineage(parent, childId, activation.parentSession)
++        signal.throwIfAborted()
++        if (activation.inbox.closing !== undefined) throw new SubagentError('Child is closing', 'ACTIVATION_CLOSING')
++        const agent = activation.handle.agent
++        if (!agent.continueInterrupted) throw new SubagentError('Driver does not support prompt-free continuation', 'NOT_RESUMABLE')
++        const started = agent.continueInterrupted(startSeq)
++        activation.announced = true
++        return started
++      })
++    } finally {
++      releaseHold()
++    }
+   }
+
+   /** Admit a materialized child, commit its creation fact, and release it on failure. */
+--- a/packages/subagent/subagent/src/index.ts
++++ b/packages/subagent/subagent/src/index.ts
+@@ -230,6 +230,18 @@
+   }
+
+   /**
++   * Continue an interrupted direct child without delivering a message.
++   * @param parent - exact live parent authorizing reconstruction.
++   * @param childId - persisted direct child identity.
++   * @param startSeq - expected interrupted turn/start sequence.
++   * @param signal - cancellation before driver start.
++   * @returns whether the existing child's driver started.
++   */
++  async continueInterrupted(parent: Agent, childId: SessionId, startSeq: number, signal: AbortSignal): Promise<boolean> {
++    return this.requireContinuations().continueInterrupted(parent, childId, startSeq, signal)
++  }
++
++  /**
+    * Steer one model-authored message to the sender's direct parent or direct
+    * continuable child. A running target admits it at the nearest step boundary;
+    * an idle target starts a turn, and an absent direct child cold-resumes from
+--- a/packages/core/agent-loop/tests/resume.spec.ts
++++ b/packages/core/agent-loop/tests/resume.spec.ts
+@@ -1338,3 +1338,58 @@
+     await configured.fiber.dispose()
+   })
+ })
++
++
++it('continues a persisted interrupted turn without another user message', async () => {
++  const sessionId = SessionId('prompt-free-resume')
++  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
++  await seedStoredSession(first, sessionId, [
++    { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
++    { type: 'user/message', seq: SessionSeq(1), time: 2, surfaceOp: 'append', data: createUserMessage({
++      content: [{ type: 'text', text: 'Finish the existing task' }], source: { kind: 'user' },
++    }) },
++  ])
++  await first.fiber.dispose()
++  const adapter = new MockAdapter([textResponse('continued')])
++  const ctx = await mountPersistentHarness(root, adapter)
++  const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
++  const agent = handle.agent
++  expect(agent.continueInterrupted?.(99)).toBe(false)
++  expect(agent.continueInterrupted?.(0)).toBe(true)
++  expect(agent.continueInterrupted?.(0)).toBe(false)
++  await agent.whenIdle()
++  expect(adapter.requests).toHaveLength(1)
++  const events = agent.session.snapshotEvents()
++  expect(events.filter(e => e.type === 'user/message')).toHaveLength(1)
++  expect(events.filter(e => e.type === 'turn/start').map(e => e.data)).toEqual([{ turn: 1 }, { turn: 2 }])
++  expect(adapter.requests[0]?.messages.filter(m => m.role === 'user').map(m => m.content))
++    .toMatchInlineSnapshot(`
++      [
++        [
++          {
++            "text": "Finish the existing task",
++            "type": "text",
++          },
++        ],
++      ]
++    `)
++  expect(agent.continueInterrupted?.(0)).toBe(false)
++  const latest = events.findLast(e => e.type === 'turn/start')
++  expect(latest).toBeDefined()
++  if (latest) expect(agent.continueInterrupted?.(latest.seq)).toBe(false)
++  await handle.dispose(); await ctx.fiber.dispose()
++})
++
++it.each(['aborted', 'completed', 'blocked'] as const)('does not auto-continue a %s turn', async reason => {
++  const sessionId = SessionId('not-interrupted-' + reason)
++  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
++  await seedStoredSession(first, sessionId, [
++    { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
++    { type: 'turn/end', seq: SessionSeq(1), time: 2, data: { turn: 1, reason: { kind: reason } } },
++  ])
++  await first.fiber.dispose()
++  const ctx = await mountPersistentHarness(root, new MockAdapter([]))
++  const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
++  expect(handle.agent.continueInterrupted?.(0)).toBe(false)
++  await handle.dispose(); await ctx.fiber.dispose()
++})
+--- a/packages/subagent/subagent/tests/continuation.spec.ts
++++ b/packages/subagent/subagent/tests/continuation.spec.ts
+@@ -6,7 +6,7 @@
+ import type { Agent } from '@deepseek-ai/dsh-agent'
+ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
+ import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+-import { SessionId } from '@deepseek-ai/dsh-session'
++import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+ import type { SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
+ import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+ import * as toolSchedule from '@deepseek-ai/dsh-schedule'
+@@ -825,6 +825,26 @@
+     expect(userTexts(loaded.events)).toEqual(['child task', 'first follow-up', 'second follow-up'])
+   })
+
++  it('resumes an interrupted child with the same identity and no delivery message', async () => {
++    const { ctx, parent } = await setup([textResponse('first'), textResponse('resumed')])
++    const started = await ctx.subagents.startContinuable(startSpec(parent))
++    await waitNoActivation(ctx, started.childId)
++    const stored = await ctx.sessionPersistence.open(started.childId, 'write')
++    const prior = await stored.read()
++    const startSeq = prior.events.length
++    await stored.append([{ type: 'turn/start', seq: SessionSeq(startSeq), time: Date.now(), data: { turn: 2 } }])
++    await stored.close()
++    const signal = new AbortController().signal
++    expect(await ctx.subagents.continueInterrupted(parent, started.childId, startSeq, signal)).toBe(true)
++    await waitNoActivation(ctx, started.childId)
++    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
++    expect(userTexts(loaded.events)).toEqual(['child task'])
++    expect(loaded.events.filter(e => e.type === 'subagent/descriptor')).toHaveLength(1)
++    expect(loaded.events.filter(e => e.type === 'turn/start').map(e => e.data.turn)).toEqual([1, 2, 3])
++    await expect(ctx.subagents.continueInterrupted({ ...parent } as Agent, started.childId, startSeq, signal))
++      .rejects.toMatchObject({ code: 'UNAUTHORIZED' })
++  })
++
+   it('cold-resumes a settled child into a new Activation', async () => {
+     const { ctx, parent } = await setup([textResponse('first'), textResponse('after resume')])
+     const started = await ctx.subagents.startContinuable(startSpec(parent))
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -158,3 +158,5 @@
+ | Scope a registration to one agent | use that agent's `agent.ctx` |
+
+ The [extension cookbook](cookbook/extension-cookbook.md) maps features to capabilities and indexes the step-by-step guides for [packages](cookbook/adding-a-package.md), [tools](cookbook/adding-a-tool.md), [LLM adapters](cookbook/adding-an-llm-adapter.md), and [settings cards](cookbook/adding-a-settings-card.md). The [Conversation subsystem](subsystems/conversation.md) owns Chat-node assembly.
++
++Hosts may explicitly continue an interrupted turn with `Agent.continueInterrupted(startSeq)`. The driver opens a new turn using existing logged context without appending user input. The call rejects busy agents, changed turns and voluntary stops; pre-step rejection and cancellation remain effective.
+--- a/packages/core/agent/README.md
++++ b/packages/core/agent/README.md
+@@ -184,3 +184,5 @@
+ This Dev Note is working context for maintainers; it is explicitly non-authoritative. Open, undecided directions: inter-agent channels beyond delegation — shared state, streaming child output, and background or poll semantics remain outside the current delegation seam; and the `SessionStartSource` values `'clear'`/`'compact'` are reserved with no emitter yet, pending the driving subsystems.
+
+ </details>
++
++`Agent.continueInterrupted?(startSeq)` is an optional driver capability for prompt-free recovery. It returns whether the exact interrupted turn was accepted; callers must not substitute a prompt when the capability is unavailable.
+--- a/packages/core/agent-loop/README.md
++++ b/packages/core/agent-loop/README.md
+@@ -208,3 +208,5 @@
+ None.
+
+ </details>
++
++`continueInterrupted(startSeq)` accepts only a live idle agent with an unchanged interrupted final turn and no pending input. It opens a new turn and permits its first request without new messages; normal pre-step policy and cancellation still apply. Historical tool calls are not re-executed.
+--- a/packages/subagent/subagent/README.md
++++ b/packages/subagent/subagent/README.md
+@@ -190,3 +190,5 @@
+ - **Host-user delivery** — a future host adapter needs a concrete authenticated interaction before the seam gains a user delivery capability.
+
+ </details>
++
++`ctx.subagents.continueInterrupted(parent, childId, startSeq, signal)` rebuilds the existing continuable child under its exact live parent and resumes the interrupted turn without a prompt. It preserves provider configuration and lineage, rejects unsupported drivers and uses the ordinary activation lock and teardown lifecycle.
+--- /dev/null
++++ b/.agents/notes/implemented/architecture/2026-09-21-prompt-free-interrupted-continuation.md
+@@ -0,0 +1,19 @@
++# Agent Note: 中断会话无提示续跑
++
++Status: implemented
++
++## Problem
++
++重启恢复通过普通提示消息唤醒 Agent，模型会把恢复说明当成新任务，偏离被中断的工作。
++
++## Decision
++
++Agent 提供可选的 `continueInterrupted(startSeq)`，仅接受当前存活、空闲、无待处理输入且最后一轮确实中断的实例。它沿用已记录上下文开启新轮次，不添加模型输入。子会话使用原父关系和已持久化描述符重建，复用 Activation 锁与释放机制。已有活动目标通过原目标服务重新启动迭代，暂停和轮数限制保持不变。
++
++## Alternatives considered
++
++缩短恢复提示仍会增加新任务输入；直接调用私有循环会绕过公开能力约定。新方法不需要改变日志格式、RPC 或 SDK 消息类型，既有 SDK 投递行为不变。
++
++## Consequences
++
++恢复插件负责启动时扫描和恢复策略；执行循环只负责经过身份核验的无提示续跑。替代驱动可以不实现该能力，此时恢复明确失败而不投递替代提示。新的持久化恢复测试和模型输入快照验证无新增消息、稳定轮次与子会话身份；取消及既有续作回归覆盖正常输入路径。

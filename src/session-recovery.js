@@ -1,4 +1,4 @@
-/** 重启恢复只读取公开会话观察；用户确认后向原会话提交续作请求。 */
+/** 重启恢复只读取公开会话观察；自动恢复原会话的迭代，不投递恢复提示。 */
 import { randomUUID } from 'node:crypto'
 import { setImmediate as yieldToHost } from 'node:timers/promises'
 
@@ -9,6 +9,8 @@ export function recoveryConfig(config = {}) {
     if (config[key] !== undefined) values[key] = config[key]
     if (!Number.isSafeInteger(values[key]) || values[key] <= 0) throw new TypeError(`${key} must be a positive integer`)
   }
+  values.recoveryAutoResume = config.recoveryAutoResume ?? true
+  if (typeof values.recoveryAutoResume !== 'boolean') throw new TypeError('recoveryAutoResume must be boolean')
   return values
 }
 
@@ -29,6 +31,15 @@ export function interruptedCandidate(observation, bootAt, lookbackMs) {
   return { id: observation.header.id, startSeq: start.seq, parentId: observation.header.origin === 'subagent' ? observation.header.parentSession : undefined }
 }
 
+/** 只重新启动重启前仍活动的现有目标，保留暂停、完成和轮数限制。 */
+export function resumeInterruptedGoal(goals, agent) {
+  const goal = goals?.get(agent)
+  if (!goal) return 'absent'
+  if (goal.phase !== 'active' || goal.roundsStarted >= goal.maxGoalRounds) return 'held'
+  if (goal.activation !== 'armed') goals.resume(agent, { id: goal.id, revision: goal.revision })
+  return 'resumed'
+}
+
 /** 每个 Host 插件实例共享一次检查及确认状态，避免多标签页重复提交。 */
 export class SessionRecovery {
   constructor(ctx, config, bootAt = Date.now() - process.uptime() * 1000) {
@@ -44,6 +55,17 @@ export class SessionRecovery {
     this.restored = 0
     this.abort = new AbortController()
     this.work = Promise.resolve()
+  }
+
+  startAutomatic() {
+    if (!this.config.recoveryAutoResume || this.phase !== 'idle') return
+    this.launch('checking', async () => {
+      await this.scan()
+      if (this.candidates.size) {
+        this.phase = 'recovering'
+        await this.recover()
+      }
+    })
   }
 
   snapshot() {
@@ -95,7 +117,7 @@ export class SessionRecovery {
       if (this.busy(header.id)) continue
       try {
         const candidate = await this.observe(header.id, value => interruptedCandidate(value, this.bootAt, this.config.recoveryLookbackMs))
-        if (candidate && !this.candidates.has(candidate.id)) this.candidates.set(candidate.id, { ...candidate, requestId: randomUUID() })
+        if (candidate && !this.candidates.has(candidate.id)) this.candidates.set(candidate.id, candidate)
       } catch (error) {
         // 单个会话损坏或读取超时保留失败计数，允许用户重试本批检查。
         this.abort.signal.throwIfAborted()
@@ -131,15 +153,26 @@ export class SessionRecovery {
       this.candidates.delete(candidate.id)
       return
     }
-    const content = [{ type: 'text', text: 'DSH 重启中断了本会话。用户已确认恢复，请从已有进度继续原任务，保持原会话和任务身份。先核对已执行操作的实际结果，避免重复写入。原子会话由同一恢复批次分别处理，请先检查原子会话状态，不要重复创建。' }]
     const signal = this.abort.signal
+    let started = false
     if (candidate.parentId) {
-      await this.ctx.subagents.prompt({ requestId: candidate.requestId, parentSessionId: candidate.parentId, childSessionId: candidate.id, mode: 'continuable', delivery: 'queue', content }, signal)
+      const parent = this.ctx.agents.get(candidate.parentId)
+      if (!this.ctx.subagents.continueInterrupted) throw new Error('Host upgrade required: prompt-free subagent continuation unavailable')
+      started = await this.ctx.subagents.continueInterrupted(parent, candidate.id, candidate.startSeq, signal)
     } else {
-      await this.ctx.sessionController.prompt({ requestId: candidate.requestId, sessionId: candidate.id, mode: 'queue', content }, signal)
+      const result = await this.ctx.sessionController.resolveAgent(candidate.id)
+      if (result.error || !result.agent) throw new Error('Original session could not be resumed')
+      signal.throwIfAborted()
+      if (this.busy(candidate.id)) { this.candidates.delete(candidate.id); return }
+      const goalResult = resumeInterruptedGoal(this.ctx.goals, result.agent)
+      if (goalResult === 'resumed') started = true
+      else if (goalResult === 'absent') {
+        if (!result.agent.continueInterrupted) throw new Error('Host upgrade required: prompt-free continuation unavailable')
+        started = result.agent.continueInterrupted(candidate.startSeq)
+      }
     }
     this.candidates.delete(candidate.id)
-    this.restored += 1
+    if (started) this.restored += 1
   }
 
   async recover() {
@@ -151,7 +184,7 @@ export class SessionRecovery {
         if (candidate.parentId) await this.ensureParent(candidate.parentId)
         await this.resume(candidate)
       } catch (error) {
-        // 单个恢复失败仍保留同一 requestId，重试前会再次检查最新轮次和队列。
+        // 单个恢复失败保留原轮次身份，重试前会再次检查最新轮次和队列。
         this.abort.signal.throwIfAborted()
         this.issues.set(candidate.id, { sessionId: candidate.id, stage: 'recover', message: String(error.message ?? error).split('\n')[0].slice(0, 300) })
       }
@@ -171,6 +204,9 @@ export function installSessionRecovery(ctx, protocol, config) {
     async read(request) { return recovery.read(request) }
   }
   protocol.Remote('read')(ChatRecoveryService.prototype.read, { private: false, static: false, name: 'read', addInitializer(initializer) { initializers.push(initializer) } })
-  ctx.effect(() => () => recovery.dispose(), 'chat recovery work')
   new ChatRecoveryService()
+  ctx.effect(() => {
+    recovery.startAutomatic()
+    return () => recovery.dispose()
+  }, 'chat recovery work')
 }

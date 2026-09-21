@@ -530,7 +530,7 @@ export function apply(ctx, config = {}) {
   registerSettings(ctx)
   const mediaStore = new MediaStore(resolved.maxAudioBytes, resolved.maxVideoBytes)
   const protocol = profileProtocol()
-  ctx.inject(['sessionQuery', 'sessionController', 'subagents'], scope => installSessionRecovery(scope, protocol, config))
+  ctx.inject(['sessionQuery', 'sessionController', 'subagents', 'goals'], scope => installSessionRecovery(scope, protocol, config))
   const ChatMediaService = createMediaService(protocol, mediaStore)
   const ChatMarkdownService = createMarkdownService(protocol, ctx, resolved.maxMarkdownBytes)
   ctx.effect(() => () => mediaStore.clear(), 'chat enhancement media cache')
