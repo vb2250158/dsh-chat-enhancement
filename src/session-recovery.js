@@ -104,7 +104,7 @@ export class SessionRecovery {
 
   busy(id) {
     const agent = this.ctx.agents.get(id)
-    return agent?.status === 'running' || (agent?.inbox.nextTurn.length ?? 0) > 0 || (agent?.inbox.nextStep.length ?? 0) > 0
+    return agent?.status === 'running'
   }
 
   async scan() {

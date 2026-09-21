@@ -32,7 +32,7 @@
    }
 
 +  continueInterrupted(startSeq: number): boolean {
-+    if (this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle' || this.inbox.hasPending) return false
++    if (this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle') return false
 +    const events = this.session.snapshotEvents()
 +    const start = events.findLast(event => event.type === 'turn/start')
 +    if (!start || start.seq !== startSeq) return false
@@ -171,13 +171,13 @@
     * an idle target starts a turn, and an absent direct child cold-resumes from
 --- a/packages/core/agent-loop/tests/resume.spec.ts
 +++ b/packages/core/agent-loop/tests/resume.spec.ts
-@@ -1338,3 +1338,58 @@
+@@ -1338,3 +1338,60 @@
      await configured.fiber.dispose()
    })
  })
 +
 +
-+it('continues a persisted interrupted turn without another user message', async () => {
++it.each([false, true])('continues a persisted interrupted turn without another user message (pending: %s)', async pending => {
 +  const sessionId = SessionId('prompt-free-resume')
 +  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
 +  await seedStoredSession(first, sessionId, [
@@ -191,15 +191,17 @@
 +  const ctx = await mountPersistentHarness(root, adapter)
 +  const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
 +  const agent = handle.agent
++  if (pending) agent.inject(createUserMessage({ content: [{ type: 'text', text: 'existing child result' }], source: { kind: 'user' } }))
 +  expect(agent.continueInterrupted?.(99)).toBe(false)
 +  expect(agent.continueInterrupted?.(0)).toBe(true)
 +  expect(agent.continueInterrupted?.(0)).toBe(false)
 +  await agent.whenIdle()
 +  expect(adapter.requests).toHaveLength(1)
 +  const events = agent.session.snapshotEvents()
-+  expect(events.filter(e => e.type === 'user/message')).toHaveLength(1)
++  expect(events.filter(e => e.type === 'user/message')).toHaveLength(pending ? 2 : 1)
 +  expect(events.filter(e => e.type === 'turn/start').map(e => e.data)).toEqual([{ turn: 1 }, { turn: 2 }])
-+  expect(adapter.requests[0]?.messages.filter(m => m.role === 'user').map(m => m.content))
++  if (pending) expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('existing child result')
++  else expect(adapter.requests[0]?.messages.filter(m => m.role === 'user').map(m => m.content))
 +    .toMatchInlineSnapshot(`
 +      [
 +        [
@@ -291,7 +293,7 @@
 
  </details>
 +
-+`continueInterrupted(startSeq)` accepts only a live idle agent with an unchanged interrupted final turn and no pending input. It opens a new turn and permits its first request without new messages; normal pre-step policy and cancellation still apply. Historical tool calls are not re-executed.
++`continueInterrupted(startSeq)` accepts only a live idle agent with an unchanged interrupted final turn; persisted pending input is retained. It opens a new turn and permits its first request without new messages; normal pre-step policy and cancellation still apply. Historical tool calls are not re-executed.
 --- a/packages/subagent/subagent/README.md
 +++ b/packages/subagent/subagent/README.md
 @@ -190,3 +190,5 @@
@@ -313,7 +315,7 @@
 +
 +## Decision
 +
-+Agent 提供可选的 `continueInterrupted(startSeq)`，仅接受当前存活、空闲、无待处理输入且最后一轮确实中断的实例。它沿用已记录上下文开启新轮次，不添加模型输入。子会话使用原父关系和已持久化描述符重建，复用 Activation 锁与释放机制。已有活动目标通过原目标服务重新启动迭代，暂停和轮数限制保持不变。
++Agent 提供可选的 `continueInterrupted(startSeq)`，仅接受当前存活、空闲且最后一轮确实中断的实例。它沿用已记录上下文开启新轮次，不添加恢复提示，保留的待处理输入仍正常消费。子会话使用原父关系和已持久化描述符重建，复用 Activation 锁与释放机制。已有活动目标通过原目标服务重新启动迭代，暂停和轮数限制保持不变。
 +
 +## Alternatives considered
 +

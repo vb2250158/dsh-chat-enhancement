@@ -70,8 +70,8 @@ test('两次确认只提交一次；失败沿用轮次身份重试，成功项�
   assert.equal(f.recovery.phase, 'done')
   f.recovery.read(request); await f.recovery.work; assert.equal(f.prompts.length, 2)
 })
-test('检查后用户已恢复或已有队列时不重复续作', async () => {
-  for (const change of ['turn', 'running', 'queued']) {
+test('检查后用户已恢复或正在运行时不重复续作', async () => {
+  for (const change of ['turn', 'running']) {
     const f = fixture(); f.recovery.read({ action: 'check' }); await f.recovery.work
     if (change === 'turn') f.values.set('root', observation('root', { reason: 'completed' }))
     else f.agents.set('root', { status: change === 'running' ? 'running' : 'idle', inbox: { nextTurn: change === 'queued' ? [{}] : [], nextStep: [] } })
@@ -129,4 +129,17 @@ test('宿主启动自动扫描并续跑，关闭配置时仍可手动检查', as
   disabled.recovery.startAutomatic(); await disabled.recovery.work
   assert.equal(disabled.reads(), 0)
   assert.equal(disabled.recovery.phase, 'idle')
+})
+
+
+test('冷恢复保留的子会话回报不会被误判成运行中，原队列继续处理', async () => {
+  const f = fixture()
+  const pending = [{ id: 'existing-child-result' }]
+  f.agents.set('root', { status: 'idle', inbox: { nextTurn: [], nextStep: pending } })
+  f.recovery.startAutomatic()
+  await f.recovery.work
+  assert.equal(f.recovery.snapshot().restored, 1)
+  assert.equal(f.prompts.length, 1)
+  assert.equal(f.prompts[0].content, undefined)
+  assert.deepEqual(pending, [{ id: 'existing-child-result' }])
 })
