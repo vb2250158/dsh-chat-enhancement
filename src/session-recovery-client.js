@@ -7,7 +7,7 @@ export const recoveryLocales = {
   en: { question: 'Restore interrupted sessions?', recover: 'Restore interrupted sessions', dismiss: 'Dismiss this recovery prompt', busy: 'Restoring interrupted sessions', failed: 'Recovery incomplete; retry', checkFailed: 'Session check failed; retry' },
 }
 
-export const recoveryCss = `.dsh-session-recovery{display:flex;align-items:center;gap:2px;min-width:0;width:100%;color:var(--dsw-alias-label-secondary);font-size:12px;white-space:nowrap}.dsh-session-recovery-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}.dsh-session-recovery button{flex-shrink:0}`
+export const recoveryCss = `.dsh-session-recovery{position:relative;display:flex;align-items:center;gap:2px;min-width:0;width:100%;color:var(--dsw-alias-label-secondary);font-size:12px;white-space:nowrap}.dsh-session-recovery-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}.dsh-session-recovery button{flex-shrink:0}.dsh-session-recovery-progress{position:absolute;inset:auto 0 0;height:2px;overflow:hidden;background:var(--dsw-alias-label-secondary);opacity:.7}.dsh-session-recovery-progress-fill{display:block;height:100%;background:var(--dsw-alias-label-primary);transition:width .25s ease}.dsh-session-recovery-progress[data-indeterminate] .dsh-session-recovery-progress-fill{width:30%;animation:dsh-recovery-progress 1.2s ease-in-out infinite}@keyframes dsh-recovery-progress{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@media(prefers-reduced-motion:reduce){.dsh-session-recovery-progress-fill{transition:none}.dsh-session-recovery-progress[data-indeterminate] .dsh-session-recovery-progress-fill{animation:none;transform:translateX(110%)}}`
 
 const recoveryRequestSchema = { parse(value) {
   if (!value || !['check', 'recover', 'dismiss'].includes(value.action) || (value.action !== 'check' && typeof value.batchId !== 'string')) throw new TypeError('Invalid recovery request')
@@ -67,6 +67,9 @@ export function SessionRecoveryPrompt({ wide, readRecovery, t }) {
   }, [readRecovery])
   if (!wide || (!error && (!state || ['idle', 'checking', 'done', 'dismissed'].includes(state.phase)))) return null
   const busy = pending || state?.phase === 'recovering'
+  const total = (state?.restored ?? 0) + (state?.count ?? 0)
+  const progress = total > 0 ? Math.round(state.restored / total * 100) : undefined
+  const indeterminate = pending || progress === undefined || progress === 0
   const label = error ? t('checkFailed') : state.phase === 'failed' ? t('failed') : state.phase === 'recovering' ? t('busy') : t('question')
   return React.createElement('div', { className: 'dsh-session-recovery', role: 'status', 'aria-busy': busy },
     React.createElement('span', { className: 'dsh-session-recovery-label', title: label }, label),
@@ -74,5 +77,7 @@ export function SessionRecoveryPrompt({ wide, readRecovery, t }) {
     React.createElement(Button, { variant: 'ghost', size: 'sm', disabled: busy, 'aria-label': t('dismiss'), title: t('dismiss'), onClick: () => {
       if (state) void operation.current?.('dismiss', state.batchId)
       else { setError(false); setState({ phase: 'dismissed' }) }
-    } }, '×'))
+    } }, '×'),
+    busy && !error ? React.createElement('div', { className: 'dsh-session-recovery-progress', role: 'progressbar', 'aria-label': t('busy'), 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': indeterminate ? undefined : progress, 'data-indeterminate': indeterminate ? '' : undefined },
+      React.createElement('span', { className: 'dsh-session-recovery-progress-fill', style: indeterminate ? undefined : { width: `${progress}%` } })) : null)
 }

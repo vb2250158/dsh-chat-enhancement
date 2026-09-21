@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.40：恢复进度线
+
+恢复提示底部显示 2px 细线，按服务端已恢复与待恢复数量更新；等待首个回执时显示流动效果，完成或失败后收起。支持减少动态效果偏好。进度表示会话续作已接收，不表示业务任务完成。
+
+A 2px line below the recovery prompt tracks accepted session resumptions. It animates while waiting for the first result, respects reduced motion, and disappears on completion or failure. It does not track task completion.
+
 ## 0.3.39：恢复时间判定
 
 冷会话重启后挂载会追加元数据；恢复检查改用中断轮次的结束时间，避免漏掉已挂载但未续作的会话。CLI 返回逐会话检查或恢复错误，便于定位部分失败。保留 0.3.38 的提问图文、图片识别及对话控件。
