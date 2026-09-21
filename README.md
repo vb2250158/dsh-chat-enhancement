@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.41：停止重复分组刷新
+
+操作与思考分组仅更新变化的文字、属性和样式；忽略两个分组自身的按钮变更及聊天以外的 DOM 更新，避免互相触发扫描。推理自动展开仅监听状态与展开属性，不再被其他插件的样式写入触发。
+
+Activity groups update changed presentation values and ignore their own buttons and unrelated page mutations. Reasoning expansion observes state and expansion attributes instead of all styling changes.
+
 ## 0.3.40：恢复进度线
 
 恢复提示底部显示 2px 细线，按服务端已恢复与待恢复数量更新；等待首个回执时显示流动效果，完成或失败后收起。支持减少动态效果偏好。进度表示会话续作已接收，不表示业务任务完成。
