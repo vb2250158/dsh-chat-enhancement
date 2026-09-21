@@ -1,6 +1,7 @@
 /** Browser entry for the chat-enhancement DSH bundle. */
 
 import * as React from 'react'
+import { recoveryDescriptor, recoveryLocales, recoveryCss, SessionRecoveryPrompt } from './session-recovery-client.js'
 import { AnnotationController, appendAnnotation, annotationLocales } from './annotations.js'
 import { AUTO_LANGUAGE, DEFAULT_ANCHOR_MODE, LANGUAGE_ANCHOR_MODES, LANGUAGES, languageAnchorMode, languageEntry } from './languages.js'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -849,6 +850,7 @@ const markdownResultSchema = { parse(value) {
   return value
 } }
 const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
+  recoveryDescriptor,
   {
     id: 'dsh-chat-enhancement#chatMedia/read', service: 'chatMedia', namespace: 'chatMedia', method: 'read', invocation: { kind: 'direct' },
     parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMediaRequest', schema: requestSchema } }],
@@ -864,8 +866,25 @@ const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
 export const inject = ['slots', 'sessions', 'remote', 'settingsScope', 'conversation', 'locale', 'modelDirectories']
 
 export async function apply(ctx) {
+  ctx.effect(() => ctx.locale.register('chat-enhancement-recovery', recoveryLocales))
+  ctx.effect(() => {
+    const style = document.createElement('style')
+    style.textContent = recoveryCss
+    document.head.appendChild(style)
+    return () => style.remove()
+  })
   ctx.effect(() => ctx.locale.register('chat-enhancement-annotations', annotationLocales))
   const dispose = await ctx.remote.$mount(previewRemote)
+  const recoveryService = ctx.reflect.get('remote.chatRecovery')
+  const readRecovery = async request => {
+    const result = await recoveryService.read(request)
+    if (!result.ok || result.value === undefined) throw new Error('Session recovery unavailable')
+    return result.value
+  }
+  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+    name: 'sidebar.footer.action', id: 'chat-enhancement-recovery', order: 100,
+    locale: 'chat-enhancement-recovery', inject: () => ({ readRecovery }),
+  }, SessionRecoveryPrompt))
   const sessions = ctx.get('sessions')
   const chatSettings = ctx.settingsScope.bind({ namespace: 'chat-enhancement' })
   const mediaService = ctx.reflect.get('remote.chatMedia')

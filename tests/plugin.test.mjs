@@ -28,6 +28,7 @@ async function loadBrowserPlugin() {
   const client = await readFile(new URL('./lib/client.js', root), 'utf8')
   let loaderEntry
   vm.runInNewContext(client, {
+    document: { createElement: () => ({ remove() {} }), head: { appendChild() {} } },
     window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
   })
   return loaderEntry.factory((name) => {
@@ -269,7 +270,7 @@ test('client groups original tool and context rows without replacing the tool-ca
   const registrations = []
   const context = {
     effect(callback) { callback() },
-    locale: { register(namespace, dictionaries) { assert.equal(namespace, 'chat-enhancement-annotations'); assert.ok(dictionaries.en); return () => {} } },
+    locale: { register(namespace, dictionaries) { assert.ok(['chat-enhancement-annotations', 'chat-enhancement-recovery'].includes(namespace)); assert.ok(dictionaries.en); return () => {} } },
     remote: { async $mount() { return () => {} } },
     get(name) { return name === 'sessions' ? { binding() {} } : undefined },
     reflect: { get(name) {

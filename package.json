@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.3.36",
+  "version": "0.3.37",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
   "main": "lib/index.js",
@@ -37,6 +37,9 @@
     "react": "^18.2.0"
   },
   "files": [
+    "src/session-recovery.js",
+    "src/session-recovery-client.js",
+    "scripts/recover-sessions.mjs",
     "lib/index.js",
     "lib/client.js",
     "lib/typert.host.js",

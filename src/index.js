@@ -517,15 +517,19 @@ function applyShowAudioTool(ctx, mediaStore) {
   })
 }
 
+import { installSessionRecovery, recoveryConfig } from './session-recovery.js'
+
 export const name = 'chat-enhancement'
 export const inject = ['tools', 'fs', 'agents']
 
 /** Compose Agent media tools, the current-session media reader, and the language preference. */
 export function apply(ctx, config = {}) {
+  recoveryConfig(config)
   const resolved = resolveConfig(config)
   registerSettings(ctx)
   const mediaStore = new MediaStore(resolved.maxAudioBytes, resolved.maxVideoBytes)
   const protocol = profileProtocol()
+  ctx.inject(['sessionQuery', 'sessionController', 'subagents'], scope => installSessionRecovery(scope, protocol, config))
   const ChatMediaService = createMediaService(protocol, mediaStore)
   const ChatMarkdownService = createMarkdownService(protocol, ctx, resolved.maxMarkdownBytes)
   ctx.effect(() => () => mediaStore.clear(), 'chat enhancement media cache')

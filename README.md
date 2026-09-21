@@ -1,5 +1,22 @@
 # DSH Chat Enhancement
 
+## 0.3.37：重启恢复会话
+
+进入网页后异步检查 DSH 启动前一小时内意外中断的会话，在会话列表底部显示一行「是否恢复意外中断会话 ✓ ×」。勾选向原会话提交续作，叉号忽略当前 Host 插件实例的提示；多标签页共享批次。检查不阻塞页面，恢复前重读记录并检查运行状态及输入队列，避免重复续作。
+
+已完成、主动取消、一次性子会话不进入候选。可续作子会话保留原父身份，已完成的普通父会话只挂载 Agent；无法挂载的父会话和部分失败保留重试入口。恢复回执表示已接收，不是任务业务完成。默认查启动前一小时，可在插件 config 设置 recoveryLookbackMs（3600000）、recoveryPollIntervalMs（1500）、recoveryReadTimeoutMs（30000），均为正整数毫秒。
+
+运维 CLI 复用同一检查和恢复接口：
+
+```powershell
+node <plugin>/scripts/recover-sessions.mjs check --base-url <本机DSH地址> --dsh-home <DSH_HOME>
+node <plugin>/scripts/recover-sessions.mjs recover --base-url <本机DSH地址> --dsh-home <DSH_HOME>
+```
+
+check 等待检查结束，recover 自动确认一次并等待批次结束；默认总超时十分钟，可用 --timeout-ms 调整。失败退出码为 2，连接和参数错误为 1。CLI 仅访问本机地址，认证留在内存。本版包含 Host 服务，安装后重启并刷新网页。
+
+验证覆盖合成中断、主动取消、继承历史、双击去重、失败重试、原父子身份、CLI 和实际 Cordis/Typert 注册卸载，以及构建产物的真实 UI 原语。
+
 ## 0.3.36: 模型与提供商标签
 
 运行状态扩展槽 `conversation.chat.running-status` 可显示当前轮最近一次实际请求的模型与提供商，等待首个请求记录时不借用上一轮模型；工具执行期间保留该轮最后一次实际调用。目录只提供显示名称，下一轮选择不改变正在运行的路由标签。此位置需要宿主提供该扩展槽；没有槽时不会插入运行标签。
