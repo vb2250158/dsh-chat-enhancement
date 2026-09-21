@@ -53,6 +53,13 @@ test('首次查询立即返回且共享一次检查；叉号跨后续查询有�
   assert.equal(f.recovery.read({ action: 'check' }).phase, 'dismissed')
   await f.recovery.dispose()
 })
+test('重启后挂载追加的 end-seed 不掩盖之前的中断轮次', () => {
+  const value = observation('resumed')
+  value.events.push({ type: 'session/end-seed', seq: 2, time: bootAt + 1000, data: {} })
+  assert.equal(interruptedCandidate(value, bootAt, 3600000).id, 'resumed')
+  value.events.push({ type: 'user/message', seq: 3, time: bootAt + 1001, data: {} })
+  assert.equal(interruptedCandidate(value, bootAt, 3600000), undefined)
+})
 test('两次确认只提交一次；失败沿用 requestId 重试，成功项不再提交', async () => {
   const f = fixture(); f.recovery.read({ action: 'check' }); await f.recovery.work
   const request = { action: 'recover', batchId: f.recovery.batchId }

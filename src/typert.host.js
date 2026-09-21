@@ -38,7 +38,7 @@ export const TYPERT = {
   schemas: [],
   model: { services: [], events: [], objects: [] },
   invocations: [
-    descriptor('chatRecovery', `${packageName}#ChatRecoveryRequest`, z.object({ action: z.enum(['check', 'recover', 'dismiss']), batchId: z.string().optional() }), `${packageName}#ChatRecoveryResult`, z.object({ batchId: z.string(), phase: z.enum(['idle', 'checking', 'ready', 'recovering', 'done', 'failed', 'dismissed']), count: z.number().int().nonnegative(), scanErrors: z.number().int().nonnegative(), restored: z.number().int().nonnegative(), pollIntervalMs: z.number().int().positive() })),
+    descriptor('chatRecovery', `${packageName}#ChatRecoveryRequest`, z.object({ action: z.enum(['check', 'recover', 'dismiss']), batchId: z.string().optional() }), `${packageName}#ChatRecoveryResult`, z.object({ batchId: z.string(), phase: z.enum(['idle', 'checking', 'ready', 'recovering', 'done', 'failed', 'dismissed']), count: z.number().int().nonnegative(), scanErrors: z.number().int().nonnegative(), restored: z.number().int().nonnegative(), pollIntervalMs: z.number().int().positive(), issues: z.array(z.object({ sessionId: z.string(), stage: z.enum(['check', 'recover']), message: z.string() })) })),
     descriptor('chatMedia', `${packageName}#ChatMediaRequest`, mediaRequest, `${packageName}#ChatMediaResult`, mediaResult),
     descriptor('chatMarkdown', `${packageName}#ChatMarkdownRequest`, markdownRequest, `${packageName}#ChatMarkdownResult`, markdownResult),
   ],

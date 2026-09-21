@@ -21,7 +21,8 @@ export function interruptedCandidate(observation, bootAt, lookbackMs) {
   const end = tail.findLast(event => event.type === 'turn/end')
   if (end && end.data.reason.kind !== 'interrupted') return undefined
   if (tail.some(event => event.type === 'user/message' && end && event.seq > end.seq)) return undefined
-  const lastTime = tail.reduce((time, event) => Math.max(time, event.time), start.time)
+  // 冷会话挂载会追加 session/end-seed；它不改变被中断轮次的发生时间。
+  const lastTime = end?.time ?? tail.filter(event => !event.type.startsWith('session/')).reduce((time, event) => Math.max(time, event.time), start.time)
   if (lastTime < bootAt - lookbackMs || lastTime >= bootAt) return undefined
   const mode = events.findLast(event => event.type === 'subagent/descriptor')?.data.mode
   if (observation.header.origin === 'subagent' && mode !== 'continuable') return undefined
@@ -39,13 +40,14 @@ export class SessionRecovery {
     this.candidates = new Map()
     this.headers = new Map()
     this.scanErrors = 0
+    this.issues = new Map()
     this.restored = 0
     this.abort = new AbortController()
     this.work = Promise.resolve()
   }
 
   snapshot() {
-    return { batchId: this.batchId, phase: this.phase, count: this.candidates.size, scanErrors: this.scanErrors, restored: this.restored, pollIntervalMs: this.config.recoveryPollIntervalMs }
+    return { batchId: this.batchId, phase: this.phase, count: this.candidates.size, scanErrors: this.scanErrors, restored: this.restored, pollIntervalMs: this.config.recoveryPollIntervalMs, issues: [...this.issues.values()] }
   }
 
   read(request) {
@@ -85,6 +87,7 @@ export class SessionRecovery {
 
   async scan() {
     this.scanErrors = 0
+    this.issues.clear()
     const records = await this.ctx.sessionQuery.listSessions(this.abort.signal)
     this.headers = new Map(records.map(record => [record.header.id, record.header]))
     for (const { header } of records) {
@@ -93,10 +96,11 @@ export class SessionRecovery {
       try {
         const candidate = await this.observe(header.id, value => interruptedCandidate(value, this.bootAt, this.config.recoveryLookbackMs))
         if (candidate && !this.candidates.has(candidate.id)) this.candidates.set(candidate.id, { ...candidate, requestId: randomUUID() })
-      } catch {
+      } catch (error) {
         // 单个会话损坏或读取超时保留失败计数，允许用户重试本批检查。
         this.abort.signal.throwIfAborted()
         this.scanErrors += 1
+        this.issues.set(header.id, { sessionId: header.id, stage: 'check', message: String(error.message ?? error).split('\n')[0].slice(0, 300) })
       }
       await yieldToHost(undefined, { signal: this.abort.signal })
     }
@@ -146,9 +150,10 @@ export class SessionRecovery {
       try {
         if (candidate.parentId) await this.ensureParent(candidate.parentId)
         await this.resume(candidate)
-      } catch {
+      } catch (error) {
         // 单个恢复失败仍保留同一 requestId，重试前会再次检查最新轮次和队列。
         this.abort.signal.throwIfAborted()
+        this.issues.set(candidate.id, { sessionId: candidate.id, stage: 'recover', message: String(error.message ?? error).split('\n')[0].slice(0, 300) })
       }
     }
     this.phase = this.candidates.size || this.scanErrors ? 'failed' : 'done'
