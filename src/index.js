@@ -1,7 +1,7 @@
 /** Host entry for the chat-enhancement DSH bundle. */
 
 import { randomUUID } from 'node:crypto'
-import { basename, extname, join, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { createGoalMetricsProjection } from './goal-metrics.js'
@@ -202,12 +202,8 @@ async function readMarkdown(ctx, maxMarkdownBytes, request) {
   const agent = ctx.agents.get(sessionId)
   if (agent === undefined) throw new Error('当前会话未加载，无法预览 Markdown。')
   const cwd = agent.session.header.cwd
-  if (cwd === undefined) throw new Error('当前会话没有工作目录，无法预览 Markdown。')
-  const [workspace, target] = await Promise.all([
-    ctx.fs.resolve('.', { cwd }),
-    ctx.fs.resolve(path, { cwd }),
-  ])
-  if (!ctx.fs.contains(workspace, target)) throw new Error('Markdown 预览只能读取当前会话工作目录内的文件。')
+  if (cwd === undefined && !isAbsolute(path)) throw new Error('当前会话没有工作目录，无法解析相对 Markdown 路径。')
+  const target = await ctx.fs.resolve(path, cwd === undefined ? undefined : { cwd })
   const info = await ctx.fs.stat(target)
   if (info === undefined) throw new Error(`cannot preview "${target.displayPath}": file not found`)
   if (info.type !== 'file') throw new Error(`cannot preview "${target.displayPath}": not a regular file`)

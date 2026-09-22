@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.50：工作区外 Markdown 预览
+
+文件卡片和文件引用中的 Markdown 预览支持本机绝对路径，也支持以当前会话工作目录解析的相对路径及上级目录路径。无工作目录的会话仍可预览绝对路径。文件必须存在、为普通 Markdown 文件且使用 UTF-8 编码；继续执行 maxMarkdownBytes 大小上限。
+
+Markdown previews accept local absolute paths and paths resolved relative to the session workspace, including parent directories. Sessions without a workspace may preview absolute paths. Regular-file, Markdown extension, UTF-8 and maxMarkdownBytes checks remain enforced.
+
 ## 0.3.49：正文代码定位链接
 
 Agent 可在回复正文使用 `[73–74 行](<C:/workspace/project/file.js#L73-L74>)` 引用已核验的代码范围；单行写 `#L73`，路径也可相对当前会话工作区。点击后打开 DSH 原有右侧代码预览器，加载到末行、定位起始行，并使用主题颜色短暂高亮。再次点击会重新定位。`chat-enhancement.codeReferenceHighlightMs` 设置高亮时间，默认 1600 毫秒，范围 100–10000。
@@ -216,7 +222,7 @@ check 等待检查结束，recover 自动确认一次并等待批次结束；默
 - 同一聊天流内连续三项及以上思考才会合并为一组；少于三项不生成摘要，摘要展开状态按聊天流稳定保存，最新一项始终显示在摘要后面。
 - 每条已定稿助手回复的操作行显示该轮实际使用的模型名（悬停展示 provider 与推理档位），位置在分支按钮后、「用时」前。该值来自该条消息自己的 `requestConfig`，因此历史回复会保留各自当时的模型。
 - 图片、视频和音频展示卡不参与折叠，始终留在聊天中；其前后的普通工具调用仍可收起。
-- Markdown 预览只读取当前活跃会话工作目录内的常规 UTF-8 文件；路径穿出工作目录、非 Markdown 文件和超限内容都会被拒绝。
+- Markdown 预览读取本机常规 UTF-8 文件；绝对路径可位于会话工作目录外，相对路径按当前会话工作目录解析。非 Markdown 文件和超限内容会被拒绝。
 - 图片预览只读取该会话日志中已经记录的 DSH 附件 ID；NAS 路径只由 Host 文件系统后端读取，浏览器不会直接访问网络共享。
 - 浏览器通过会话授权的 `readAttachment` 获取字节，并在内存中创建、释放 `blob:` URL。
 - 不读取 `file://`，不直接访问本机或 NAS 路径，不保存文件内容或个人配置。

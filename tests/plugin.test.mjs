@@ -142,7 +142,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(host, /name: 'show_audio'/)
   assert.match(host, /attachments\.saveImage/)
   assert.match(host, /chatMarkdown/)
-  assert.match(host, /ctx\.fs\.contains/)
+  assert.doesNotMatch(host, /ctx\.fs\.contains/)
   assert.match(host, /maxMarkdownBytes/)
   assert.match(host, /settingsCtx\.settings\.register\(CHAT_ENHANCEMENT_SETTINGS_NAMESPACE/)
   assert.match(host, /audioAutoplay: z\.boolean\(\)\.default\(false\)/)
