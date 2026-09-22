@@ -1,6 +1,7 @@
 /** Browser entry for the chat-enhancement DSH bundle. */
 
 import * as React from 'react'
+import { installCodeReferences } from './code-references-client.js'
 import { QuestionRichContent, questionContentLocales, questionContentCss } from './question-content.js'
 import { recoveryDescriptor, recoveryLocales, recoveryCss, SessionRecoveryPrompt } from './session-recovery-client.js'
 import { AnnotationController, appendAnnotation, annotationLocales } from './annotations.js'
@@ -909,7 +910,7 @@ const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
   },
 ] }
 
-export const inject = ['slots', 'sessions', 'remote', 'remote.goals', 'settingsScope', 'conversation', 'locale', 'modelDirectories']
+export const inject = ['slots', 'sessions', 'remote', 'remote.goals', 'settingsScope', 'conversation', 'locale', 'modelDirectories', 'sidebarRight']
 
 export async function apply(ctx) {
   ctx.effect(() => ctx.locale.register('chat-enhancement-question-content', questionContentLocales))
@@ -939,6 +940,7 @@ export async function apply(ctx) {
   }, SessionRecoveryPrompt))
   const sessions = ctx.get('sessions')
   const chatSettings = ctx.settingsScope.bind({ namespace: 'chat-enhancement' })
+  installCodeReferences(ctx, chatSettings)
   ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
     name: 'conversation.session.header.actions', id: 'job-list', priority: 100, order: 20,
     locale: 'chat-enhancement-jobs', inject: () => ({ chatSettings }),

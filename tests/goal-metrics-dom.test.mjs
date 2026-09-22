@@ -37,7 +37,7 @@ test('发布产物复用真实目标栏，计时刷新、编辑动作及完成�
     const plugin = entry.factory(name => name === 'react' ? React : name === '@deepseek-ai/dsh-client-ui-goal' ? goal : primitives)
     const rows = [], dictionaries = new Map()
     await plugin.apply({ effect(fn) { disposers.push(fn()) }, locale: { register(id, value) { dictionaries.set(id, value); return () => {} } },
-      remote: { async $mount() { return () => {} } }, get: () => ({}), settingsScope: { bind: () => ({}) }, reflect: { get: () => ({ read() {} }) },
+      remote: { async $mount() { return () => {} } }, get: () => ({}), settingsScope: { bind: () => ({}) }, reflect: { provide: () => () => {}, get: () => ({ read() {} }) },
       slots: { inject(_key, fn) { fn() }, register(options, component) { rows.push({ options, component }); return () => {} } } })
     const dock = rows.find(row => row.options.id === 'goal')
     assert.ok(dock.options.priority < 0, '覆盖默认优先级为 0 的官方目标栏')

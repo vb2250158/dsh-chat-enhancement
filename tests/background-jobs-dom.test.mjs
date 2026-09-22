@@ -44,7 +44,7 @@ test('生成的插件使用真实原语显示后台说明，支持开关、会�
       remote: { async $mount() { return () => {} } },
       get: () => ({}),
       settingsScope: { bind: () => chatSettings },
-      reflect: { get: () => ({ read() {} }) },
+      reflect: { provide: () => () => {}, get: () => ({ read() {} }) },
       slots: { inject(_name, callback) { callback() }, register(options, component) { registrations.push({ options, component }); return () => {} } },
     })
     const registration = registrations.find(item => item.options.id === 'job-list')

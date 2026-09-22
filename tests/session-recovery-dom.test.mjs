@@ -32,7 +32,7 @@ test('发布产物用真实按钮呈现单行恢复提示，确认去重、失�
       effect(callback) { disposers.push(callback()) },
       locale: { register(id, value) { locales.set(id, value); return () => locales.delete(id) } },
       remote: { async $mount() { return () => {} } }, get: () => ({}),
-      settingsScope: { bind: () => ({}) }, reflect: { get: () => ({ read() {} }) },
+      settingsScope: { bind: () => ({}) }, reflect: { provide: () => () => {}, get: () => ({ read() {} }) },
       slots: { inject(_slot, callback) { callback() }, register(options, component) { registrations.push({ options, component }); return () => {} } },
     })
     const row = registrations.find(item => item.options.id === 'chat-enhancement-recovery')

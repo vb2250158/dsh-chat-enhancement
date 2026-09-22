@@ -100,7 +100,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   // 原生 <select> 的弹层由系统绘制，`--dsw-*` 令牌管不到它，所以必须走 Menu 原语。
   assert.doesNotMatch(client, /createElement\('select'/)
   assert.doesNotMatch(client, /languageSelectStyle/)
-  assert.match(client, /const \{ MarkdownText, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
+  assert.match(client, /const \{ CodeBlock, MarkdownText, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
   assert.match(client, /variant: 'outline'/)
   assert.match(client, /aria-haspopup': 'menu'/)
   assert.match(client, /audioAutoplay/)
@@ -275,7 +275,7 @@ test('client groups original tool and context rows without replacing the tool-ca
     locale: { register(namespace, dictionaries) { assert.ok(['chat-enhancement-goal-metrics', 'chat-enhancement-question-content', 'chat-enhancement-annotations', 'chat-enhancement-jobs', 'chat-enhancement-recovery'].includes(namespace)); assert.ok(dictionaries.en); return () => {} } },
     remote: { async $mount() { return () => {} } },
     get(name) { return name === 'sessions' ? { binding() {} } : undefined },
-    reflect: { get(name) {
+    reflect: { provide: () => () => {}, get(name) {
       if (name === 'remote.chatMedia') return { async read() { return { ok: true, value: {} } } }
       if (name === 'remote.chatMarkdown') return { async read() { return { ok: true, value: {} } } }
       return undefined

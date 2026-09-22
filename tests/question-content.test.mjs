@@ -36,7 +36,7 @@ test('两个生成插件通过公开插槽显示问题及选项图文，保留�
     const registrations = []
     const dictionaries = new Map()
     const slots = { inject(_key, fn) { fn() }, register(options, component) { registrations.push({ options, component }); return () => {} } }
-    await chat.apply({ slots, effect(fn) { disposers.push(fn()) }, locale: { register(name, values) { dictionaries.set(name, values); return () => {} } }, remote: { async $mount() { return () => {} } }, get: () => ({}), settingsScope: { bind: () => ({}) }, reflect: { get: () => ({ read() {} }) } })
+    await chat.apply({ slots, effect(fn) { disposers.push(fn()) }, locale: { register(name, values) { dictionaries.set(name, values); return () => {} } }, remote: { async $mount() { return () => {} } }, get: () => ({}), settingsScope: { bind: () => ({}) }, reflect: { provide: () => () => {}, get: () => ({ read() {} }) } })
     questions.apply({ slots })
     const rich = registrations.find(x => x.options.name === 'proactive.question.content')
     const dock = registrations.find(x => x.options.id === 'proactive-questioning-dock')

@@ -452,6 +452,7 @@ function registerSettings(ctx) {
       // a browser-local store would not survive a reload or reach another tab.
       expandReasoningWhileRunning: z.boolean().default(false),
       reasoningCollapseDelayMs: z.number().min(0).step(1).default(3000),
+      codeReferenceHighlightMs: z.number().min(100).max(10000).step(1).default(1600),
       language: z.string().default(AUTO_LANGUAGE),
       // The allowed ids come from the shared catalog, so the browser picker and
       // this validator cannot disagree about what a valid mode is. The Host
@@ -460,6 +461,11 @@ function registerSettings(ctx) {
       languageAnchor: z.union(LANGUAGE_ANCHOR_MODES.map(mode => z.const(mode.id))).default(DEFAULT_ANCHOR_MODE),
       toolDescriptions: z.boolean().default(true),
     }))
+    settingsCtx.systemPrompt.section({
+      name: 'private:chat-enhancement-code-references',
+      order: 9040,
+      text: () => '引用本地代码时，将行范围写成 Markdown 链接：[73–74 行](<C:/workspace/project/file.js#L73-L74>)。使用真实文件路径和已核验的行号（从 1 开始）；单行写 #L73，路径也可相对当前会话工作区。点击后会在 DSH 原有右侧代码预览器中定位并短暂高亮。不要编造行号，也不要依靠前文文件名解释裸行号。HTTP 链接仍按普通网页链接处理。',
+    })
     settingsCtx.systemPrompt.section({
       name: 'private:chat-enhancement-language',
       order: LANGUAGE_SECTION_ORDER,
