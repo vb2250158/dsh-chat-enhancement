@@ -48,10 +48,10 @@ test('缺失用量标记不完整，后续同请求补齐消除缺失，暂停�
 })
 
 test('耗时跨小时、跨天且负值归零', () => {
-  assert.equal(goalDuration(61000), '01:01')
-  assert.equal(goalDuration(3661000), '1:01:01')
-  assert.equal(goalDuration(90061000), '25:01:01')
-  assert.equal(goalDuration(-1000), '00:00')
+  assert.equal(goalDuration(61000), '1分1秒')
+  assert.equal(goalDuration(3661000), '1小时1分')
+  assert.equal(goalDuration(90061000), '25小时1分')
+  assert.equal(goalDuration(-1000), '0秒')
 })
 
 test('较旧远程读不覆盖实时激活事件，卸载释放监听', async () => {

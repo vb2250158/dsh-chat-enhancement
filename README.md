@@ -1,6 +1,10 @@
 # DSH Chat Enhancement
 
-## 0.3.46：目标耗时与完成统计
+## 0.3.47：目标耗时与完成统计
+
+耗时显示最多两个带名称的单位，例如 2小时23分、6分55秒；不足一分钟只显示秒。
+
+Elapsed time uses at most two named units, such as 2h23m or 6m55s; durations under one minute show seconds only.
 
 目标栏实时显示从创建起的耗时，编辑目标不会重置时间。复用公开 GoalBar 和编辑弹窗，保留暂停、恢复、编辑和清除。完成轮次的最后一条回复显示“目标已完成”、累计 token 和总耗时；刷新、分页、新建目标后仍保留历史统计。
 

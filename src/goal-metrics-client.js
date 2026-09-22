@@ -1,13 +1,16 @@
 /** 目标栏复用公开 GoalBar/GoalEditDialog，统计从宿主日志投影读取。 */
 export const goalMetricsLocales = {
-  zh: { completed: '目标已完成', elapsed: '用时', running: '已运行', partial: '已记录', detail: '包含等待和暂停时间；token 为本会话目标期间的输入、缓存和输出用量，含重试，不含子会话。' },
-  en: { completed: 'Goal completed', elapsed: 'Elapsed', running: 'Elapsed', partial: 'Recorded', detail: 'Includes waiting and pauses. Tokens cover input, cache and output in this session during the goal, including retries, excluding child sessions.' },
+  zh: { hour: '小时', minute: '分', second: '秒', completed: '目标已完成', elapsed: '用时', running: '已运行', partial: '已记录', detail: '包含等待和暂停时间；token 为本会话目标期间的输入、缓存和输出用量，含重试，不含子会话。' },
+  en: { hour: 'h', minute: 'm', second: 's', completed: 'Goal completed', elapsed: 'Elapsed', running: 'Elapsed', partial: 'Recorded', detail: 'Includes waiting and pauses. Tokens cover input, cache and output in this session during the goal, including retries, excluding child sessions.' },
 }
 
-export function goalDuration(milliseconds) {
+export function goalDuration(milliseconds, t = key => goalMetricsLocales.zh[key]) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000))
   const hours = Math.floor(seconds / 3600)
-  return `${hours > 0 ? `${hours}:` : ''}${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  const minutes = Math.floor(seconds / 60) % 60
+  if (hours > 0) return `${hours}${t('hour')}${minutes}${t('minute')}`
+  if (minutes > 0) return `${minutes}${t('minute')}${seconds % 60}${t('second')}`
+  return `${seconds}${t('second')}`
 }
 
 export function GoalCompletionBadge({ messageId, useProjection, t }) {
@@ -16,7 +19,7 @@ export function GoalCompletionBadge({ messageId, useProjection, t }) {
   const tokens = `${summary.missing > 0 ? `${t('partial')} ≥ ` : ''}${summary.tokens.toLocaleString()} token`
   return React.createElement(Tooltip, { label: t('detail') },
     React.createElement('span', { 'data-dsh-goal-completed': summary.id, className: 'dsh-goal-completed' },
-      `${t('completed')} · ${tokens} · ${t('elapsed')} ${goalDuration(summary.completedAt - summary.createdAt)}`))
+      `${t('completed')} · ${tokens} · ${t('elapsed')} ${goalDuration(summary.completedAt - summary.createdAt, t)}`))
 }
 
 /** 正式目标变更与连接重置使旧读失效；无订阅时释放所有监听。 */
@@ -58,7 +61,7 @@ export function goalActivationSource(binding, remote, sessionId, onReset) {
   }
 }
 
-export function TimedGoalDock({ useProjection, useGoalActivation, t, ...actions }) {
+export function TimedGoalDock({ useProjection, useGoalActivation, t, formatDuration, ...actions }) {
   const projection = useProjection('goal')
   const goal = projection?.goal
   const activation = useGoalActivation(value => value.id === goal?.id && value.revision === goal?.revision ? value.activation : undefined)
@@ -70,7 +73,7 @@ export function TimedGoalDock({ useProjection, useGoalActivation, t, ...actions 
     return () => clearInterval(timer)
   }, [goal?.id, goal?.phase])
   const timedTranslate = key => key.startsWith('phase.') && projection
-    ? `${t(key)} · ${goalDuration(now - projection.createdAt)}` : t(key)
+    ? `${t(key)} · ${formatDuration(now - projection.createdAt)}` : t(key)
   return React.createElement(GoalBar, { ...actions, goal: goal ?? projection, activation, t: timedTranslate })
 }
 
@@ -101,6 +104,7 @@ export function installGoalMetricsClient(ctx) {
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'goal', priority: -100, order: 10, locale: 'goal',
     inject: sessionId => ({
+      formatDuration: milliseconds => goalDuration(milliseconds, ctx.locale.bind('chat-enhancement-goal-metrics')),
       hooks: { goalActivation: goalActivationSource(ctx.sessions.binding(sessionId), ctx.remote, sessionId, listener => ctx.on('connection/reset', listener)) },
       onEdit: objective => dialogFor(sessionId).open(objective),
       onPause: () => mutate(sessionId, 'pause'), onResume: () => mutate(sessionId, 'resume'), onClear: () => mutate(sessionId, 'clear'),

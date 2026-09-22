@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import vm from 'node:vm'
 import test from 'node:test'
+import { goalDuration } from '../src/goal-metrics-client.js'
 
 test('发布产物复用真实目标栏，计时刷新、编辑动作及完成尾注匹配消息', { skip: !process.env.DSH_SOURCE_ROOT }, async () => {
   const sourceRoot = process.env.DSH_SOURCE_ROOT
@@ -42,11 +43,11 @@ test('发布产物复用真实目标栏，计时刷新、编辑动作及完成�
     assert.ok(dock.options.priority < 0, '覆盖默认优先级为 0 的官方目标栏')
     const projection = { goal: { id: 'a', revision: 1, phase: 'active', objective: '合成测试目标' }, createdAt: Date.now() - 65000 }
     let edited
-    const props = { useProjection: () => projection, useGoalActivation: select => select({ id: 'a', revision: 1, activation: 'armed' }),
+    const props = { formatDuration: goalDuration, useProjection: () => projection, useGoalActivation: select => select({ id: 'a', revision: 1, activation: 'armed' }),
       t: key => ({ 'phase.active': '进行中的目标', 'action.edit': '编辑目标', 'action.pause': '暂停目标', 'action.clear': '清除目标' })[key] ?? key,
       onEdit: text => { edited = text }, onPause: async () => ({ ok: true }), onResume: async () => ({ ok: true }), onClear: async () => ({ ok: true }) }
     await React.act(async () => root.render(React.createElement(dock.component, props)))
-    assert.match(document.querySelector('[data-goal-bar]').textContent, /进行中的目标 · 01:0[5-9]/)
+    assert.match(document.querySelector('[data-goal-bar]').textContent, /进行中的目标 · 1分[5-9]秒/)
     assert.equal(intervals.size, 1)
     await React.act(async () => document.querySelector('[aria-label="编辑目标"]').click())
     assert.equal(edited, '合成测试目标')
@@ -58,7 +59,7 @@ test('发布产物复用真实目标栏，计时刷新、编辑动作及完成�
     const badgeProps = { messageId: 'final', t: key => dictionaries.get(badge.options.locale).zh[key],
       useProjection: () => ({ completed: { final: { id: 'a', tokens: 213363, missing: 0, createdAt: 1000, completedAt: 3662000 } } }) }
     await React.act(async () => root.render(React.createElement(badge.component, badgeProps)))
-    assert.equal(document.querySelector('[data-dsh-goal-completed]').textContent, '目标已完成 · 213,363 token · 用时 1:01:01')
+    assert.equal(document.querySelector('[data-dsh-goal-completed]').textContent, '目标已完成 · 213,363 token · 用时 1小时1分')
     await React.act(async () => root.render(React.createElement(badge.component, { ...badgeProps, messageId: 'other' })))
     assert.equal(document.querySelector('[data-dsh-goal-completed]'), null)
   } finally {
