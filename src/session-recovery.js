@@ -85,6 +85,13 @@ export class SessionRecovery {
       if (this.phase === 'idle') this.launch('checking', () => this.scan())
     } else {
       if (request.batchId !== this.batchId) throw new Error('Recovery batch expired; check again.')
+      if (request.action === 'recover-quota') {
+        if (this.active || this.candidates.size || this.scanErrors) throw new Error('Finish the current recovery batch first')
+        if (!Array.isArray(request.targets) || !request.targets.length || request.targets.some(target => typeof target.id !== 'string' || !target.id || !Number.isSafeInteger(target.startSeq) || target.startSeq < 0) || new Set(request.targets.map(target => target.id)).size !== request.targets.length) throw new Error('Quota recovery requires unique session ids and exact turn sequences')
+        this.issues.clear()
+        for (const target of request.targets) this.candidates.set(target.id, { id: target.id, startSeq: target.startSeq, kind: 'quota' })
+        this.launch('recovering', () => this.recover())
+      }
       if (request.action === 'dismiss' && !this.active) this.phase = 'dismissed'
       else if (request.action === 'recover' && !this.active && ['ready', 'failed'].includes(this.phase)) {
         this.launch('recovering', async () => {
@@ -206,7 +213,12 @@ export class SessionRecovery {
   async resume(candidate) {
     this.abort.signal.throwIfAborted()
     this.setStage('validating', candidate.id)
-    const current = await this.observe(candidate.id, value => interruptedCandidate(value, this.bootAt, this.config.recoveryLookbackMs))
+    const current = await this.observe(candidate.id, value => {
+      if (candidate.kind !== 'quota') return interruptedCandidate(value, this.bootAt, this.config.recoveryLookbackMs)
+      if (value.header.origin === 'subagent') throw new Error('Quota recovery requires an original root session')
+      const start = value.events.findLast(event => event.type === 'turn/start' && event.seq >= value.inheritedEventCount)
+      return start ? { startSeq: start.seq } : undefined
+    })
     if (this.busy(candidate.id) || !current || current.startSeq !== candidate.startSeq) {
       this.candidates.delete(candidate.id)
       return
@@ -225,11 +237,18 @@ export class SessionRecovery {
       signal.throwIfAborted()
       if (this.busy(candidate.id)) { this.candidates.delete(candidate.id); return }
       this.setStage('resuming', candidate.id)
-      const goalResult = resumeInterruptedGoal(this.ctx.goals, result.agent)
-      if (goalResult === 'resumed') started = true
-      else if (goalResult === 'absent') {
-        if (!result.agent.continueInterrupted) throw new Error('Host upgrade required: prompt-free continuation unavailable')
-        started = result.agent.continueInterrupted(candidate.startSeq)
+      if (candidate.kind === 'quota') {
+        if (this.ctx.goals?.get(result.agent)) throw new Error('Use the existing goal continuation for goal sessions')
+        if (!result.agent.continueQuotaFailure) throw new Error('Host upgrade required: prompt-free quota continuation unavailable')
+        started = result.agent.continueQuotaFailure(candidate.startSeq)
+        if (!started) throw new Error('Quota continuation rejected: the original turn is no longer eligible')
+      } else {
+        const goalResult = resumeInterruptedGoal(this.ctx.goals, result.agent)
+        if (goalResult === 'resumed') started = true
+        else if (goalResult === 'absent') {
+          if (!result.agent.continueInterrupted) throw new Error('Host upgrade required: prompt-free continuation unavailable')
+          started = result.agent.continueInterrupted(candidate.startSeq)
+        }
       }
     }
     this.candidates.delete(candidate.id)

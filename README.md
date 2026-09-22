@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.53：额度耗尽会话免消息续作
+
+CLI 支持 `recover-quota --targets <JSON 文件>`；文件内容为 `[{"id":"原会话 ID","startSeq":原轮次序号}]`。先完成当前重启恢复批次，再显式提交额度目标。Host 校验最终 QUOTA 或历史 PI_AI_ERROR 402、原轮次及空闲状态，保留原 ID 和队列且不新增用户消息。正在运行、已换轮次的会话跳过；主动结束、其他错误、目标及子会话拒绝普通额度续作。失败项通过原 `recover` 命令重试。
+
+需要依次应用 `host-patches/prompt-free-recovery.patch` 和 `host-patches/quota-failure-continuation.patch` 并构建 Host。自动重启扫描不会恢复历史额度错误。CLI 的完成数量表示原生续作已启动；后续额度仍不足时会话会记录新的错误。
+
 ## 0.3.51：工作区外 Markdown 预览
 
 文件卡片和文件引用中的 Markdown 预览支持本机绝对路径，也支持以当前会话工作目录解析的相对路径及上级目录路径。无工作目录的会话仍可预览绝对路径。文件必须存在、为普通 Markdown 文件且使用 UTF-8 编码；继续执行 maxMarkdownBytes 大小上限。补齐预览原语所需的本地化文案，代码块和脚注可正常渲染。

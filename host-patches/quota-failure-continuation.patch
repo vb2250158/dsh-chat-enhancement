@@ -1,0 +1,288 @@
+--- a/packages/core/agent/src/runtime-types.ts
++++ b/packages/core/agent/src/runtime-types.ts
+@@ -229,6 +229,14 @@
+      */
+     continueInterrupted?(startSeq: number): boolean
+
++    /**
++     * 显式续作额度错误结束的原轮次，不追加用户消息。支持 QUOTA 和旧 PI_AI_ERROR 402。
++     * 忙碌、已换轮次、后续用户消息或其他结束原因均拒绝；替代驱动可不提供。
++     * @param startSeq - 调用者观察到的原 turn/start 序号。
++     * @returns 是否同步启动了新轮次。
++     */
++    continueQuotaFailure?(startSeq: number): boolean
++
+
+     /**
+    * Submit steering for the nearest step. An idle driver starts a turn;
+--- a/packages/core/agent-loop/src/agent.ts
++++ b/packages/core/agent-loop/src/agent.ts
+@@ -139,13 +139,18 @@
+   }
+
+   continueInterrupted(startSeq: number): boolean {
++    return this.continueStopped(startSeq, false)
++  }
++
++  continueQuotaFailure(startSeq: number): boolean {
++    return this.continueStopped(startSeq, true)
++  }
++
++  private continueStopped(startSeq: number, quotaFailure: boolean): boolean {
+     if (this.loopCtx.agents.get(this.id) !== this || this.phase.kind !== 'idle') return false
+-    const events = this.session.snapshotEvents()
+-    const start = events.findLast(event => event.type === 'turn/start')
+-    if (!start || start.seq !== startSeq) return false
+-    const end = events.findLast(event => event.type === 'turn/end' && event.seq > startSeq)
+-    if (end?.type === 'turn/end' && end.data.reason.kind !== 'interrupted') return false
+-    if (events.some(event => event.type === 'user/message' && end !== undefined && event.seq > end.seq)) return false
++    const state = this.loopCtx.sessionProjections.stateOf(this.session, 'nativeContinuation')
++    if (!state || state.startSeq !== startSeq || startSeq < this.session.inheritedEventCount) return false
++    if (quotaFailure ? state.kind !== 'quota' : state.kind !== 'open' && state.kind !== 'interrupted') return false
+     this.wakeDriver(false, true)
+     return true
+   }
+--- a/packages/core/agent-loop/src/index.ts
++++ b/packages/core/agent-loop/src/index.ts
+@@ -33,6 +33,7 @@
+ import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
+ import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
+ import { ReactLoopAgent } from './agent.ts'
++import { nativeContinuationProjection } from './continuation.ts'
+ import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
+
+ /** Fiber states that cannot own or serve a new lifecycle. */
+@@ -414,6 +415,7 @@
+     // Register only after every config validation above has passed, so a
+     // rejected constructor leaves no projection unit behind.
+     ctx.sessionProjections.register(turnBoundaryProjectionDefinition)
++    ctx.sessionProjections.register(nativeContinuationProjection)
+     this.ownership = new FactoryOwnership(ctx.fiber)
+     this.runtime = { ctx }
+     ctx.effect(() => () => this.ownership.dispose(), 'agentLoop.transactions()')
+--- a/packages/core/agent-loop/tests/resume.spec.ts
++++ b/packages/core/agent-loop/tests/resume.spec.ts
+@@ -1340,7 +1340,7 @@
+ })
+
+
+-it.each([false, true])('continues a persisted interrupted turn without another user message (pending: %s)', async pending => {
++it.each([false, true])('continues a persisted interrupted turn without another user message (pending: %s)', async (pending) => {
+   const sessionId = SessionId('prompt-free-resume')
+   const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
+   await seedStoredSession(first, sessionId, [
+@@ -1382,7 +1382,7 @@
+   await handle.dispose(); await ctx.fiber.dispose()
+ })
+
+-it.each(['aborted', 'completed', 'blocked'] as const)('does not auto-continue a %s turn', async reason => {
++it.each(['aborted', 'completed', 'blocked'] as const)('does not auto-continue a %s turn', async (reason) => {
+   const sessionId = SessionId('not-interrupted-' + reason)
+   const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
+   await seedStoredSession(first, sessionId, [
+@@ -1393,5 +1393,69 @@
+   const ctx = await mountPersistentHarness(root, new MockAdapter([]))
+   const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
+   expect(handle.agent.continueInterrupted?.(0)).toBe(false)
++  expect(handle.agent.continueQuotaFailure?.(0)).toBe(false)
+   await handle.dispose(); await ctx.fiber.dispose()
+ })
++
++it.each([
++  ['QUOTA', 'usage_limit_reached', true],
++  ['PI_AI_ERROR', '402 status code (no body)', true],
++  ['SERVER', '402 status code (no body)', false],
++  ['RATE_LIMIT', '429 rate limit', false],
++  ['PI_AI_ERROR', 'transport failure after 402 status code', false],
++] as const)('额度续作按最终错误判定且不追加消息：%s %s', async (code, message, accepted) => {
++  const sessionId = SessionId('quota-native-resume')
++  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
++  await seedStoredSession(first, sessionId, [
++    { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
++    { type: 'user/message', seq: SessionSeq(1), time: 2, surfaceOp: 'append', data: createUserMessage({
++      content: [{ type: 'text', text: 'Finish the original task' }], source: { kind: 'user' },
++    }) },
++    { type: 'turn/end', seq: SessionSeq(2), time: 3, data: { turn: 1, reason: { kind: 'error', error: { code, message } } } },
++  ])
++  await first.fiber.dispose()
++  const adapter = new MockAdapter([textResponse('continued')])
++  const ctx = await mountPersistentHarness(root, adapter)
++  const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
++  const agent = handle.agent
++  expect(agent.continueInterrupted?.(0)).toBe(false)
++  expect(agent.continueQuotaFailure?.(99)).toBe(false)
++  expect(agent.continueQuotaFailure?.(0)).toBe(accepted)
++  if (accepted) {
++    expect(agent.continueQuotaFailure?.(0)).toBe(false)
++    await agent.whenIdle()
++    expect(adapter.requests).toHaveLength(1)
++    expect(agent.id).toBe(sessionId)
++    expect(agent.session.snapshotEvents().filter(e => e.type === 'user/message')).toHaveLength(1)
++    expect(adapter.requests[0]?.messages.filter(m => m.role === 'user').map(m => m.content))
++      .toMatchInlineSnapshot(`
++        [
++          [
++            {
++              "text": "Finish the original task",
++              "type": "text",
++            },
++          ],
++        ]
++      `)
++    expect(agent.continueQuotaFailure?.(0)).toBe(false)
++  } else expect(adapter.requests).toHaveLength(0)
++  await handle.dispose(); await ctx.fiber.dispose()
++})
++
++it('额度错误之后已有用户消息时不续作旧轮次', async () => {
++  const sessionId = SessionId('quota-new-input')
++  const { ctx: first, root } = await persistentHarness(new MockAdapter([]))
++  await seedStoredSession(first, sessionId, [
++    { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
++    { type: 'turn/end', seq: SessionSeq(1), time: 2, data: { turn: 1, reason: { kind: 'error', error: { code: 'QUOTA', message: 'quota' } } } },
++    { type: 'user/message', seq: SessionSeq(2), time: 3, surfaceOp: 'append', data: createUserMessage({
++      content: [{ type: 'text', text: 'Changed task' }], source: { kind: 'user' },
++    }) },
++  ])
++  await first.fiber.dispose()
++  const ctx = await mountPersistentHarness(root, new MockAdapter([]))
++  const handle = await ctx.agents.resume({ resumeSessionId: sessionId, agentOptions: { provider: 'mock', model: 'mock' } })
++  expect(handle.agent.continueQuotaFailure?.(0)).toBe(false)
++  await handle.dispose(); await ctx.fiber.dispose()
++})
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -160,3 +160,5 @@
+ The [extension cookbook](cookbook/extension-cookbook.md) maps features to capabilities and indexes the step-by-step guides for [packages](cookbook/adding-a-package.md), [tools](cookbook/adding-a-tool.md), [LLM adapters](cookbook/adding-an-llm-adapter.md), and [settings cards](cookbook/adding-a-settings-card.md). The [Conversation subsystem](subsystems/conversation.md) owns Chat-node assembly.
+
+ Hosts may explicitly continue an interrupted turn with `Agent.continueInterrupted(startSeq)`. The driver opens a new turn using existing logged context without appending user input. The call rejects busy agents, changed turns and voluntary stops; pre-step rejection and cancellation remain effective.
++
++原生额度续作由 Agent 的 `continueQuotaFailure(startSeq)` 校验原轮次并启动新轮次，不追加用户消息。显式调用仅接受最终 `QUOTA` 或旧版 `PI_AI_ERROR` 402；自动重启恢复仍仅处理意外中断。
+--- a/docs/architecture.zh.md
++++ b/docs/architecture.zh.md
+@@ -162,3 +162,5 @@
+ | 将注册项限定到单个 agent | 使用该 agent 的 `agent.ctx` |
+
+ [扩展实操手册](cookbook/extension-cookbook.zh.md)将功能映射到能力，并索引[包](cookbook/adding-a-package.zh.md)、[工具](cookbook/adding-a-tool.zh.md)、[LLM（大语言模型）适配器](cookbook/adding-an-llm-adapter.zh.md)和[设置卡片](cookbook/adding-a-settings-card.zh.md)的分步指南。[Conversation 子系统](subsystems/conversation.zh.md)负责 Chat node 组装。
++
++原生额度续作由 Agent 的 `continueQuotaFailure(startSeq)` 校验原轮次并启动新轮次，不追加用户消息。显式调用仅接受最终 `QUOTA` 或旧版 `PI_AI_ERROR` 402；自动重启恢复仍仅处理意外中断。
+--- a/packages/core/agent-loop/README.md
++++ b/packages/core/agent-loop/README.md
+@@ -210,3 +210,5 @@
+ </details>
+
+ `continueInterrupted(startSeq)` accepts only a live idle agent with an unchanged interrupted final turn; persisted pending input is retained. It opens a new turn and permits its first request without new messages; normal pre-step policy and cancellation still apply. Historical tool calls are not re-executed.
++
++`continueQuotaFailure(startSeq)` 显式续作最终额度错误，不新增用户消息。它要求原 Agent 空闲、最后轮次匹配且没有后续用户输入；最终错误必须为 `QUOTA` 或旧版 `PI_AI_ERROR` 的 `402 status code`。重复提交、其他错误和主动结束均拒绝。
+--- a/packages/core/agent-loop/README.zh.md
++++ b/packages/core/agent-loop/README.zh.md
+@@ -208,3 +208,5 @@
+ 无。
+
+ </details>
++
++`continueQuotaFailure(startSeq)` 显式续作最终额度错误，不新增用户消息。它要求原 Agent 空闲、最后轮次匹配且没有后续用户输入；最终错误必须为 `QUOTA` 或旧版 `PI_AI_ERROR` 的 `402 status code`。重复提交、其他错误和主动结束均拒绝。
+--- /dev/null
++++ b/packages/core/agent-loop/src/continuation.ts
+@@ -0,0 +1,44 @@
++/** 从已提交事件维护免消息续作资格，避免每次启动扫描完整历史。 */
++import { z } from 'zod'
++import { SessionSeq } from '@deepseek-ai/dsh-session'
++import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
++
++const schema = z.object({
++  startSeq: z.number().int().nonnegative().transform(SessionSeq).nullable(),
++  kind: z.enum(['none', 'open', 'interrupted', 'quota', 'closed']),
++})
++
++declare module '@deepseek-ai/dsh-session-projection/types' {
++  interface SessionProjectionStateMap {
++    /** 最后轮次的原生续作资格；后续用户消息使已结束轮次失效。 */
++    nativeContinuation: z.infer<typeof schema>
++  }
++}
++
++/** 只保留续作必需的轮次坐标和最终结束分类。 */
++export const nativeContinuationProjection = {
++  key: 'nativeContinuation',
++  stateVersion: 1,
++  stateSchema: schema,
++  init: () => ({ startSeq: null, kind: 'none' }),
++  apply: (state, event) => {
++    switch (event.type) {
++      case 'turn/start':
++        return { startSeq: event.seq, kind: 'open' }
++      case 'turn/end': {
++        const { reason } = event.data
++        if (reason.kind === 'interrupted') return { ...state, kind: 'interrupted' }
++        if (reason.kind === 'error') {
++          const { error } = reason
++          if (error.code === 'QUOTA' || (error.code === 'PI_AI_ERROR' && /^402 status code(?:\s|$)/u.test(error.message))) return { ...state, kind: 'quota' }
++        }
++        return { ...state, kind: 'closed' }
++      }
++      case 'user/message':
++        return state.kind === 'open' ? state : { ...state, kind: 'closed' }
++      default:
++        // 其它扩展事件不改变轮次的结束原因和续作资格。
++        return state
++    }
++  },
++} satisfies ProjectionDefinition<'nativeContinuation', z.infer<typeof schema>>
+--- /dev/null
++++ b/.agents/notes/implemented/feature/2026-09-22-quota-failure-continuation.md
+@@ -0,0 +1,21 @@
++# Agent Note: 额度耗尽后的原生续作
++
++Status: implemented
++
++English | [中文](2026-09-22-quota-failure-continuation.zh.md)
++
++## Problem
++
++普通会话因额度耗尽结束后，已有接口只接受意外中断，无法保持原会话并免消息续作。
++
++## Decision
++
++增加显式 `continueQuotaFailure(startSeq)`。Host 投影在恢复时重建并逐事件维护最后轮次坐标和结束分类；Agent 在同一同步操作内核对当前注册实例、空闲状态、最后轮次、最终额度错误和后续用户输入，随后复用原生免消息驱动。只接受 QUOTA 或历史 PI_AI_ERROR 402，不根据重试历史推断额度。恢复插件接收明确的原会话和轮次列表，复用进度、超时及失败重试；自动启动扫描范围保持不变。
++
++## Alternatives considered
++
++发送“继续”会追加用户消息；扩大自动恢复会意外启动历史错误会话。两者均不采用。目标会话保留原目标迭代入口，普通额度入口拒绝目标及子会话。
++
++## Consequences
++
++不新增会话事件或 SDK 输出字段，原轮次和新轮次仍由现有日志重建。持久化恢复测试验证原 ID、唯一用户消息和模型输入快照，并覆盖重复提交、非额度错误、主动结束和后续输入。部署后使用相同 Remote 与 CLI 核对原会话产生新轮次。
+--- /dev/null
++++ b/.agents/notes/implemented/feature/2026-09-22-quota-failure-continuation.zh.md
+@@ -0,0 +1,21 @@
++# Agent Note: 额度耗尽后的原生续作
++
++Status: implemented
++
++[English](2026-09-22-quota-failure-continuation.md) | 中文
++
++## Problem
++
++普通会话因额度耗尽结束后，已有接口只接受意外中断，无法保持原会话并免消息续作。
++
++## Decision
++
++增加显式 `continueQuotaFailure(startSeq)`。Host 投影在恢复时重建并逐事件维护最后轮次坐标和结束分类；Agent 在同一同步操作内核对当前注册实例、空闲状态、最后轮次、最终额度错误和后续用户输入，随后复用原生免消息驱动。只接受 QUOTA 或历史 PI_AI_ERROR 402，不根据重试历史推断额度。恢复插件接收明确的原会话和轮次列表，复用进度、超时及失败重试；自动启动扫描范围保持不变。
++
++## Alternatives considered
++
++发送“继续”会追加用户消息；扩大自动恢复会意外启动历史错误会话。两者均不采用。目标会话保留原目标迭代入口，普通额度入口拒绝目标及子会话。
++
++## Consequences
++
++不新增会话事件或 SDK 输出字段，原轮次和新轮次仍由现有日志重建。持久化恢复测试验证原 ID、唯一用户消息和模型输入快照，并覆盖重复提交、非额度错误、主动结束和后续输入。部署后使用相同 Remote 与 CLI 核对原会话产生新轮次。
+--- /dev/null
++++ b/.agents/notes/implemented/feature/2026-09-22-quota-failure-continuation.i18n.yaml
+@@ -0,0 +1,6 @@
++# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
++# side as of the last confirmed-consistent state. Both languages carry equal authority;
++# after editing either side, bring the other along and re-record with:
++#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-22-quota-failure-continuation.md
++2026-09-22-quota-failure-continuation.md: df100d6e111217840b2f8cbd2045fc84a463a7d5
++2026-09-22-quota-failure-continuation.zh.md: e7988a61fc996bffe50b458ee7c013366ea0e59f

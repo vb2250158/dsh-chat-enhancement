@@ -9,8 +9,8 @@ import { parseArgs } from 'node:util'
 import { setTimeout as delay } from 'node:timers/promises'
 
 /** 等待异步检查结束；recover 只确认一次，共享批次负责去重。 */
-export async function runRecovery(read, { action, timeoutMs = 600000, now = Date.now, wait = delay }) {
-  if (!['check', 'recover'].includes(action)) throw new Error('命令必须为 check 或 recover')
+export async function runRecovery(read, { action, targets, timeoutMs = 600000, now = Date.now, wait = delay }) {
+  if (!['check', 'recover', 'recover-quota'].includes(action)) throw new Error('命令必须为 check、recover 或 recover-quota')
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('超时必须为正整数毫秒')
   const deadline = now() + timeoutMs
   const poll = async state => {
@@ -26,6 +26,7 @@ export async function runRecovery(read, { action, timeoutMs = 600000, now = Date
   if (action === 'recover' && ['ready', 'failed'].includes(state.phase)) {
     state = await poll(await read({ action: 'recover', batchId: state.batchId }))
   }
+  if (action === 'recover-quota') state = await poll(await read({ action, batchId: state.batchId, targets }))
   return state
 }
 
@@ -61,10 +62,11 @@ export function localRecoveryReader({ baseUrl, dshHome, requestTimeoutMs = 30000
 }
 
 async function main() {
-  const { values, positionals } = parseArgs({ allowPositionals: true, options: { 'base-url': { type: 'string' }, 'dsh-home': { type: 'string' }, 'timeout-ms': { type: 'string' }, 'request-timeout-ms': { type: 'string' } } })
-  if (positionals.length !== 1 || !values['base-url']) throw new Error('用法：node recover-sessions.mjs <check|recover> --base-url <本机 DSH URL> [--dsh-home <Home>] [--timeout-ms <毫秒>]')
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: { targets: { type: 'string' }, 'base-url': { type: 'string' }, 'dsh-home': { type: 'string' }, 'timeout-ms': { type: 'string' }, 'request-timeout-ms': { type: 'string' } } })
+  if (positionals.length !== 1 || !values['base-url']) throw new Error('用法：node recover-sessions.mjs <check|recover|recover-quota> --base-url <本机 DSH URL> [--targets <JSON 文件>] [--dsh-home <Home>] [--timeout-ms <毫秒>]')
   const read = localRecoveryReader({ baseUrl: values['base-url'], dshHome: resolve(values['dsh-home'] || process.env.DSH_HOME || join(homedir(), '.dsh')), requestTimeoutMs: Number(values['request-timeout-ms'] || 30000) })
-  const state = await runRecovery(read, { action: positionals[0], timeoutMs: Number(values['timeout-ms'] || 600000) })
+  const targets = values.targets ? JSON.parse(readFileSync(resolve(values.targets), 'utf8').replace(/^\uFEFF/u, '')) : undefined
+  const state = await runRecovery(read, { action: positionals[0], targets, timeoutMs: Number(values['timeout-ms'] || 600000) })
   console.log(JSON.stringify(state))
   if (state.phase === 'failed') process.exitCode = 2
 }
