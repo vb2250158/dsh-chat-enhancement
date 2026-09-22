@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { basename, extname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
+import { createGoalMetricsProjection } from './goal-metrics.js'
 import {
   AUTO_LANGUAGE,
   DEFAULT_ANCHOR_MODE,
@@ -525,6 +526,11 @@ export const inject = ['tools', 'fs', 'agents']
 
 /** Compose Agent media tools, the current-session media reader, and the language preference. */
 export function apply(ctx, config = {}) {
+  ctx.inject(['sessionProjections'], scope => {
+    const { z } = profileRequire()('zod')
+    const { lastAssistantStreamChunk } = profileRequire()('@deepseek-ai/dsh-llm')
+    scope.effect(() => scope.sessionProjections.register(createGoalMetricsProjection(z, lastAssistantStreamChunk)))
+  })
   recoveryConfig(config)
   const resolved = resolveConfig(config)
   registerSettings(ctx)

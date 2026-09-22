@@ -1,5 +1,13 @@
 # DSH Chat Enhancement
 
+## 0.3.44：目标耗时与完成统计
+
+目标栏实时显示从创建起的耗时，编辑目标不会重置时间。复用公开 GoalBar 和编辑弹窗，保留暂停、恢复、编辑和清除。完成轮次的最后一条回复显示“目标已完成”、累计 token 和总耗时；刷新、分页、新建目标后仍保留历史统计。
+
+时间包含等待和暂停，完成时计至收尾轮结束。token 来自本会话目标创建后到收尾轮结束的已记录请求，包含重试、输入、缓存和输出，不重复累加 reasoning，不包含子会话。提供商缺少用量时标为“已记录 ≥”，不把缺失量当作零消耗。
+
+The goal bar shows elapsed wall time from creation, retaining the public goal controls and edit dialog. The final reply of the completion turn displays goal completion, cumulative tokens and elapsed time. Full-log projections retain summaries across reloads, pagination and replacement goals. Time includes waiting and pauses through the closing turn. Tokens cover recorded input, cache and output usage, including retries, in this session only; missing provider usage is explicitly marked as a lower bound.
+
 ## 0.3.43：保留队列的中断恢复
 
 冷恢复保留的子会话回报和待处理输入继续在原会话消费，不再把空闲队列误判成正在运行。中断轮次身份检查仍阻止重复启动。

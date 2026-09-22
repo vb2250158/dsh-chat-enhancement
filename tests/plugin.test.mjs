@@ -32,6 +32,7 @@ async function loadBrowserPlugin() {
     document: { createElement: () => ({ remove() {} }), head: { appendChild() {} } },
   })
   return loaderEntry.factory((name) => {
+    if (name === '@deepseek-ai/dsh-client-ui-goal') return {}
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
     if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutline14() {} }
     throw new Error(`unexpected browser dependency: ${name}`)
@@ -46,6 +47,7 @@ async function loadBrowserHelpers() {
     window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
   })
   return loaderEntry.factory((name) => {
+    if (name === '@deepseek-ai/dsh-client-ui-goal') return {}
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
     if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutline14() {} }
     throw new Error(`unexpected browser dependency: ${name}`)
@@ -270,7 +272,7 @@ test('client groups original tool and context rows without replacing the tool-ca
   const registrations = []
   const context = {
     effect(callback) { callback() },
-    locale: { register(namespace, dictionaries) { assert.ok(['chat-enhancement-question-content', 'chat-enhancement-annotations', 'chat-enhancement-jobs', 'chat-enhancement-recovery'].includes(namespace)); assert.ok(dictionaries.en); return () => {} } },
+    locale: { register(namespace, dictionaries) { assert.ok(['chat-enhancement-goal-metrics', 'chat-enhancement-question-content', 'chat-enhancement-annotations', 'chat-enhancement-jobs', 'chat-enhancement-recovery'].includes(namespace)); assert.ok(dictionaries.en); return () => {} } },
     remote: { async $mount() { return () => {} } },
     get(name) { return name === 'sessions' ? { binding() {} } : undefined },
     reflect: { get(name) {
@@ -506,6 +508,7 @@ async function loadAutoExpandHelpers() {
     window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
   })
   return loaderEntry.factory((name) => {
+    if (name === '@deepseek-ai/dsh-client-ui-goal') return {}
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
     if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutline14() {} }
     throw new Error(`unexpected browser dependency: ${name}`)

@@ -926,6 +926,7 @@ export async function apply(ctx) {
     return () => style.remove()
   })
   const dispose = await ctx.remote.$mount(previewRemote)
+  installGoalMetricsClient(ctx)
   const recoveryService = ctx.reflect.get('remote.chatRecovery')
   const readRecovery = async request => {
     const result = await recoveryService.read(request)
