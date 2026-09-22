@@ -143,3 +143,77 @@ test('冷恢复保留的子会话回报不会被误判成运行中，原队列�
   assert.equal(f.prompts[0].content, undefined)
   assert.deepEqual(pending, [{ id: 'existing-child-result' }])
 })
+
+test('不响应的列表读取在期限内失败，批次可以重试', async () => {
+  const f = fixture(); f.recovery.config.recoveryReadTimeoutMs = 15
+  let release
+  f.ctx.sessionQuery.listSessions = () => new Promise(resolve => { release = resolve })
+  f.recovery.startAutomatic()
+  await new Promise(resolve => setTimeout(resolve, 5))
+  assert.equal(f.recovery.snapshot().stage, 'listing')
+  await f.recovery.work
+  assert.equal(f.recovery.phase, 'failed')
+  assert.match(f.recovery.snapshot().issues[0].message, /timeout/)
+  release([])
+  await Promise.resolve()
+  f.recovery.read({ action: 'recover', batchId: f.recovery.batchId })
+  await new Promise(resolve => setTimeout(resolve, 5))
+  release([])
+  await f.recovery.work
+  assert.equal(f.recovery.phase, 'done')
+})
+
+test('挂载卡住显示当前身份和进度，超时重试复用未完成调用', async () => {
+  const f = fixture(); f.recovery.config.recoveryReadTimeoutMs = 20
+  let release, calls = 0
+  const original = f.ctx.sessionController.resolveAgent
+  f.ctx.sessionController.resolveAgent = id => { calls++; return new Promise(resolve => { release = async () => resolve(await original(id)) }) }
+  f.recovery.startAutomatic()
+  await new Promise(resolve => setTimeout(resolve, 8))
+  const snapshot = f.recovery.snapshot()
+  assert.equal(snapshot.stage, 'attaching'); assert.equal(snapshot.currentSessionId, 'root')
+  assert.equal(snapshot.total, 1); assert.equal(snapshot.completed, 0)
+  // 中途状态不可绕过批次运行锁。
+  f.recovery.phase = 'ready'
+  f.recovery.read({ action: 'recover', batchId: f.recovery.batchId })
+  assert.equal(calls, 1)
+  await f.recovery.work
+  assert.equal(f.recovery.phase, 'failed')
+  f.recovery.read({ action: 'recover', batchId: f.recovery.batchId })
+  await new Promise(resolve => setTimeout(resolve, 5))
+  assert.equal(calls, 1)
+  await release(); await f.recovery.work
+  assert.equal(f.recovery.phase, 'done'); assert.equal(f.prompts.length, 1)
+  assert.equal(f.recovery.snapshot().completed, 1)
+})
+
+test('超时读取的迟到观察句柄释放，卸载不等待失联提供方', async () => {
+  const f = fixture(); f.recovery.config.recoveryReadTimeoutMs = 10
+  let release, disposed = 0
+  f.ctx.sessionQuery.observeSession = () => new Promise(resolve => { release = resolve })
+  f.recovery.startAutomatic(); await f.recovery.work
+  assert.equal(f.recovery.phase, 'failed')
+  const value = observation('root'); value[Symbol.dispose] = () => { disposed++ }
+  release(value); await Promise.resolve(); await Promise.resolve()
+  assert.equal(disposed, 1)
+  f.ctx.sessionQuery.listSessions = () => new Promise(() => {})
+  f.recovery.read({ action: 'recover', batchId: f.recovery.batchId })
+  await new Promise(resolve => setTimeout(resolve, 2))
+  await f.recovery.dispose()
+  assert.equal(f.recovery.active, false)
+})
+
+test('检查重试只读取失败项，成功记录不重复扫描', async () => {
+  const f = fixture([observation('good'), observation('bad')])
+  const original = f.ctx.sessionQuery.observeSession
+  const readIds = []
+  let broken = true
+  f.ctx.sessionQuery.observeSession = id => { readIds.push(id); if (id === 'bad' && broken) throw new Error('bad record'); return original(id) }
+  f.recovery.read({ action: 'check' }); await f.recovery.work
+  assert.deepEqual(readIds, ['good', 'bad'])
+  broken = false; readIds.length = 0
+  await f.recovery.scan()
+  assert.deepEqual(readIds, ['bad'])
+  assert.equal(f.recovery.snapshot().total, 1)
+  assert.equal(f.recovery.snapshot().count, 2)
+})

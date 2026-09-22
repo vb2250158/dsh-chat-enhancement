@@ -1,5 +1,13 @@
 # DSH Chat Enhancement
 
+## 0.3.48：恢复阶段与超时重试
+
+恢复行显示读取列表、检查记录、核验、挂载或续作阶段，以及本阶段处理数量和当前会话等待秒数。细线使用当前阶段的实际计数；未知总量显示流动线。悬停可查看当前会话身份及失败原因。
+
+列表读取、观察、挂载和子会话续作的等待使用 `recoveryReadTimeoutMs`（默认 30000 毫秒）。超时后保留原批次供重试；未完成的挂载或续作调用复用原 Promise，观察句柄迟到时释放。检查重试只重读失败项。客户端请求超时后解除按钮禁用，可重新查询；自动恢复仍不投递提示消息。
+
+The recovery row reports listing, scanning, validation, loading and resumption stages with processed counts and elapsed waiting time. The thin line reflects the current stage; unknown totals remain indeterminate. Hover reveals the session identity and failure detail. `recoveryReadTimeoutMs` bounds each Host wait (default 30000 ms). Retry retains the batch and reuses unresolved loading/resumption calls, disposes late observation handles and rescans only failed records. A client timeout enables querying again. Recovery continues without synthetic prompts.
+
 ## 0.3.47：目标耗时与完成统计
 
 耗时显示最多两个带名称的单位，例如 2小时23分、6分55秒；不足一分钟只显示秒。
