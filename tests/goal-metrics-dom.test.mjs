@@ -39,7 +39,7 @@ test('发布产物复用真实目标栏，计时刷新、编辑动作及完成�
       remote: { async $mount() { return () => {} } }, get: () => ({}), settingsScope: { bind: () => ({}) }, reflect: { get: () => ({ read() {} }) },
       slots: { inject(_key, fn) { fn() }, register(options, component) { rows.push({ options, component }); return () => {} } } })
     const dock = rows.find(row => row.options.id === 'goal')
-    assert.equal(dock.options.priority, 100)
+    assert.ok(dock.options.priority < 0, '覆盖默认优先级为 0 的官方目标栏')
     const projection = { goal: { id: 'a', revision: 1, phase: 'active', objective: '合成测试目标' }, createdAt: Date.now() - 65000 }
     let edited
     const props = { useProjection: () => projection, useGoalActivation: select => select({ id: 'a', revision: 1, activation: 'armed' }),

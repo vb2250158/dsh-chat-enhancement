@@ -99,7 +99,7 @@ export function installGoalMetricsClient(ctx) {
   }
   ctx.effect(() => () => { for (const dialog of dialogs.values()) dialog.dispose(); dialogs.clear() })
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-    name: 'conversation.input.dock', id: 'goal', priority: 100, order: 10, locale: 'goal',
+    name: 'conversation.input.dock', id: 'goal', priority: -100, order: 10, locale: 'goal',
     inject: sessionId => ({
       hooks: { goalActivation: goalActivationSource(ctx.sessions.binding(sessionId), ctx.remote, sessionId, listener => ctx.on('connection/reset', listener)) },
       onEdit: objective => dialogFor(sessionId).open(objective),
@@ -107,7 +107,7 @@ export function installGoalMetricsClient(ctx) {
     }),
   }, TimedGoalDock))
   ctx.slots.inject('conversation.input.overlay', () => ctx.slots.register({
-    name: 'conversation.input.overlay', id: 'goal-edit-dialog', priority: 100, order: 3, locale: 'goal',
+    name: 'conversation.input.overlay', id: 'goal-edit-dialog', priority: -100, order: 3, locale: 'goal',
     inject: sessionId => {
       const dialog = dialogFor(sessionId)
       return { hooks: { goalEditDialog: dialog.state }, edit: text => dialog.edit(text), submit: () => dialog.submitDraft(), dismiss: () => dialog.dismiss() }
