@@ -6,6 +6,7 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 export const annotationLocales = {
   zh: {
     'model.redirected': '已重定向',
+    'markdown.copy': '复制', 'markdown.copied': '已复制', 'markdown.footnotes': '脚注',
     mark: '批注', quote: '引用原文', note: '批注内容', add: '添加到聊天', cancel: '取消',
     editTitle: '编辑批注', update: '更新批注',
     unavailable: '当前草稿暂不可添加，请退出命令模式或等待提交完成后重试。',
@@ -13,6 +14,7 @@ export const annotationLocales = {
   },
   en: {
     'model.redirected': 'Redirected',
+    'markdown.copy': 'Copy', 'markdown.copied': 'Copied', 'markdown.footnotes': 'Footnotes',
     mark: 'Annotate', quote: 'Quoted text', note: 'Comment', add: 'Add to chat', cancel: 'Cancel',
     editTitle: 'Edit annotation', update: 'Update annotation',
     unavailable: 'Cannot add to this draft yet. Exit command mode or wait for submission, then try again.',

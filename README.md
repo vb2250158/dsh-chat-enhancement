@@ -1,8 +1,8 @@
 # DSH Chat Enhancement
 
-## 0.3.50：工作区外 Markdown 预览
+## 0.3.51：工作区外 Markdown 预览
 
-文件卡片和文件引用中的 Markdown 预览支持本机绝对路径，也支持以当前会话工作目录解析的相对路径及上级目录路径。无工作目录的会话仍可预览绝对路径。文件必须存在、为普通 Markdown 文件且使用 UTF-8 编码；继续执行 maxMarkdownBytes 大小上限。
+文件卡片和文件引用中的 Markdown 预览支持本机绝对路径，也支持以当前会话工作目录解析的相对路径及上级目录路径。无工作目录的会话仍可预览绝对路径。文件必须存在、为普通 Markdown 文件且使用 UTF-8 编码；继续执行 maxMarkdownBytes 大小上限。补齐预览原语所需的本地化文案，代码块和脚注可正常渲染。
 
 Markdown previews accept local absolute paths and paths resolved relative to the session workspace, including parent directories. Sessions without a workspace may preview absolute paths. Regular-file, Markdown extension, UTF-8 and maxMarkdownBytes checks remain enforced.
 

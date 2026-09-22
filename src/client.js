@@ -437,7 +437,8 @@ function ChatEnhancementSettingsSection({ chatSettings }) {
     React.createElement('p', { style: mutedStyle }, '只在当前聊天已打开后，Agent 新完成展示调用时尝试播放；进入聊天或恢复历史消息不会播放。浏览器仍可能阻止未交互页面的有声自动播放。'))
 }
 
-function MarkdownPreviewController({ sessionId, readMarkdown }) {
+function MarkdownPreviewController({ sessionId, readMarkdown, t }) {
+  const labels = React.useMemo(() => ({ code: { copyLabel: t('markdown.copy'), copiedLabel: t('markdown.copied') }, footnotes: t('markdown.footnotes') }), [t])
   const [preview, setPreview] = React.useState(null)
   React.useEffect(() => {
     const onClick = (event) => {
@@ -466,7 +467,7 @@ function MarkdownPreviewController({ sessionId, readMarkdown }) {
         ? React.createElement('p', { role: 'alert', style: { color: 'var(--dsw-alias-state-error-primary)' } }, `预览失败：${preview.error}`)
         : preview.text === null
           ? React.createElement('p', { role: 'status', style: mutedStyle }, '加载预览…')
-          : React.createElement(MarkdownText, { text: preview.text }),
+          : React.createElement(MarkdownText, { text: preview.text, labels }),
     ),
   )
 }
@@ -962,7 +963,7 @@ export async function apply(ctx) {
     name: 'conversation.input.dock', id: 'chat-enhancement-media-autoplay-session', order: 99,
   }, MediaAutoplaySessionController))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-    name: 'conversation.input.dock', id: 'chat-enhancement-markdown-preview', order: 100,
+    name: 'conversation.input.dock', id: 'chat-enhancement-markdown-preview', order: 100, locale: 'chat-enhancement-annotations',
     inject: () => ({ readMarkdown }),
   }, MarkdownPreviewController))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
