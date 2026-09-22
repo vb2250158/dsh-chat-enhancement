@@ -23,7 +23,7 @@ test('Markdown 弹窗使用真实原语渲染代码块、脚注和关闭', { ski
   const disposers = []
   try {
     const base = resolve(sourceRoot, 'packages/client/ui-primitives/lib/types')
-    const primitives = Object.assign({}, ...await Promise.all(['Button.js', 'markdown/MarkdownText.js', 'icons/index.js'].map(file => import(pathToFileURL(resolve(base, file)).href))))
+    const primitives = Object.assign({}, ...await Promise.all(['Modal.js', 'Button.js', 'markdown/MarkdownText.js', 'icons/index.js'].map(file => import(pathToFileURL(resolve(base, file)).href))))
     const load = async file => {
       let result
       const win = Object.create(dom.window)
@@ -42,11 +42,15 @@ test('Markdown 弹窗使用真实原语渲染代码块、脚注和关闭', { ski
     await React.act(async () => root.render(React.createElement(entry.component, { sessionId: 'one', t, readMarkdown: async () => ({ name: 'SKILL.md', text }) })))
     const card = document.createElement('button'); card.title = 'C:/outside/SKILL.md'; document.body.append(card)
     await React.act(async () => card.click())
+    assert.equal(document.getElementById('app').querySelector('[role="dialog"]'), null)
     assert.equal(document.querySelector('[role="dialog"] h1').textContent, '标题')
     assert.match(document.querySelector('[role="dialog"] pre').textContent, /const preview = true/)
     assert.match(document.querySelector('[data-footnotes]').textContent, /脚注内容/)
     assert.ok([...document.querySelectorAll('[role="dialog"] button')].some(button => button.textContent === '复制'))
     await React.act(async () => document.querySelector('[aria-label="关闭 Markdown 预览"]').click())
+    assert.equal(document.querySelector('[role="dialog"]'), null)
+    await React.act(async () => card.click())
+    await React.act(async () => document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' })))
     assert.equal(document.querySelector('[role="dialog"]'), null)
   } finally {
     await React.act(async () => root.unmount())

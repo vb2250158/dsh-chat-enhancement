@@ -5,3 +5,5 @@
 使用真实 Cordis 服务与临时文件验证工作区内外、上级目录、无 cwd 绝对路径以及缺失文件、目录、非 Markdown、非法 UTF-8 和过大文件。发布后从实际页面点击工作区外 Markdown 文件引用，并核对返回内容。
 
 实际 SKILL.md 包含代码块；原弹窗遗漏 MarkdownText 必需的 labels，路径限制解除后暴露渲染异常。弹窗现在通过已有 locale namespace 提供复制、已复制和脚注文案，产物 DOM 测试覆盖代码块及脚注。
+
+Markdown 预览使用公共 Modal 挂载到页面根层，避免被右侧面板遮挡；沿用主题背景、关闭按钮和 Escape 关闭行为。

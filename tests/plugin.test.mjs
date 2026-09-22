@@ -100,7 +100,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   // 原生 <select> 的弹层由系统绘制，`--dsw-*` 令牌管不到它，所以必须走 Menu 原语。
   assert.doesNotMatch(client, /createElement\('select'/)
   assert.doesNotMatch(client, /languageSelectStyle/)
-  assert.match(client, /const \{ CodeBlock, MarkdownText, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
+  assert.match(client, /const \{ CodeBlock, MarkdownText, Modal, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
   assert.match(client, /variant: 'outline'/)
   assert.match(client, /aria-haspopup': 'menu'/)
   assert.match(client, /audioAutoplay/)

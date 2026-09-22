@@ -6,6 +6,7 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 export const annotationLocales = {
   zh: {
     'model.redirected': '已重定向',
+    'markdown.close': '关闭 Markdown 预览', 'markdown.loading': '加载预览…', 'markdown.error': '预览失败：',
     'markdown.copy': '复制', 'markdown.copied': '已复制', 'markdown.footnotes': '脚注',
     mark: '批注', quote: '引用原文', note: '批注内容', add: '添加到聊天', cancel: '取消',
     editTitle: '编辑批注', update: '更新批注',
@@ -14,6 +15,7 @@ export const annotationLocales = {
   },
   en: {
     'model.redirected': 'Redirected',
+    'markdown.close': 'Close Markdown preview', 'markdown.loading': 'Loading preview…', 'markdown.error': 'Preview failed: ',
     'markdown.copy': 'Copy', 'markdown.copied': 'Copied', 'markdown.footnotes': 'Footnotes',
     mark: 'Annotate', quote: 'Quoted text', note: 'Comment', add: 'Add to chat', cancel: 'Cancel',
     editTitle: 'Edit annotation', update: 'Update annotation',

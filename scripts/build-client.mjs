@@ -20,7 +20,7 @@ await writeFile(new URL('lib/client.js', root), `window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react')
     const { GoalBar, GoalEditDialog, GoalEditDialogController } = require('@deepseek-ai/dsh-client-ui-goal')
-    const { CodeBlock, MarkdownText, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { CodeBlock, MarkdownText, Modal, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
 ${languages}
 ${annotations}
 ${backgroundJobs}

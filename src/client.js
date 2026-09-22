@@ -6,14 +6,11 @@ import { QuestionRichContent, questionContentLocales, questionContentCss } from 
 import { recoveryDescriptor, recoveryLocales, recoveryCss, SessionRecoveryPrompt } from './session-recovery-client.js'
 import { AnnotationController, appendAnnotation, annotationLocales } from './annotations.js'
 import { AUTO_LANGUAGE, DEFAULT_ANCHOR_MODE, LANGUAGE_ANCHOR_MODES, LANGUAGES, languageAnchorMode, languageEntry } from './languages.js'
-import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MarkdownText, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 
 const overlayStyle = { position: 'fixed', inset: 0, zIndex: 1000, display: 'grid', placeItems: 'center', padding: '24px', background: 'rgb(0 0 0 / 70%)' }
 const cardStyle = { display: 'grid', gap: '8px', margin: '8px 0', padding: '10px 12px', border: '1px solid var(--dsw-alias-line-primary)', borderRadius: '10px' }
 const mutedStyle = { color: 'var(--dsw-alias-label-tertiary)', fontSize: '13px' }
-const markdownDialogStyle = { width: 'min(960px, 100%)', maxHeight: 'min(85vh, 900px)', overflow: 'auto', padding: '20px', borderRadius: '12px', background: 'var(--dsw-alias-bg-elevated)', color: 'var(--dsw-alias-label-primary)', boxShadow: '0 20px 48px rgb(0 0 0 / 35%)' }
-const markdownHeaderStyle = { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }
-const closeButtonStyle = { marginLeft: 'auto', border: 0, borderRadius: '6px', padding: '6px 9px', background: 'transparent', color: 'inherit', cursor: 'pointer' }
 const toolGroupButtonStyle = { display: 'flex', width: '100%', alignItems: 'center', gap: '8px', border: 0, padding: '6px 0', background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', textAlign: 'left' }
 const imageDialogStyle = { ...overlayStyle, padding: 0, background: 'rgb(0 0 0 / 88%)', touchAction: 'pan-y' }
 const imageDialogToolbarStyle = { position: 'absolute', top: 'max(12px, env(safe-area-inset-top))', right: 'max(12px, env(safe-area-inset-right))', zIndex: 2, display: 'flex', gap: '8px' }
@@ -458,15 +455,12 @@ function MarkdownPreviewController({ sessionId, readMarkdown, t }) {
     return () => { document.removeEventListener('click', onClick, true) }
   }, [readMarkdown, sessionId])
   if (preview === null) return null
-  return React.createElement('div', { 'data-dsh-chat-enhancement-markdown': true, role: 'dialog', 'aria-modal': true, 'aria-label': preview.name, style: overlayStyle, onClick: () => setPreview(null) },
-    React.createElement('article', { style: markdownDialogStyle, onClick: event => event.stopPropagation() },
-      React.createElement('header', { style: markdownHeaderStyle },
-        React.createElement('strong', null, preview.name),
-        React.createElement('button', { type: 'button', style: closeButtonStyle, onClick: () => setPreview(null), 'aria-label': '关闭 Markdown 预览' }, '关闭')),
+  return React.createElement(Modal, { open: true, title: preview.name, closeLabel: t('markdown.close'), className: 'dsh-chat-markdown-dialog', onClose: () => setPreview(null) },
+    React.createElement('div', { 'data-dsh-chat-enhancement-markdown': true, style: { maxHeight: '70vh', overflow: 'auto' } },
       preview.error !== null
-        ? React.createElement('p', { role: 'alert', style: { color: 'var(--dsw-alias-state-error-primary)' } }, `预览失败：${preview.error}`)
+        ? React.createElement('p', { role: 'alert', style: { color: 'var(--dsw-alias-state-error-primary)' } }, `${t('markdown.error')}${preview.error}`)
         : preview.text === null
-          ? React.createElement('p', { role: 'status', style: mutedStyle }, '加载预览…')
+          ? React.createElement('p', { role: 'status', style: mutedStyle }, t('markdown.loading'))
           : React.createElement(MarkdownText, { text: preview.text, labels }),
     ),
   )
@@ -923,7 +917,7 @@ export async function apply(ctx) {
   ctx.effect(() => ctx.locale.register('chat-enhancement-jobs', backgroundJobLocales))
   ctx.effect(() => {
     const style = document.createElement('style')
-    style.textContent = backgroundJobCss + recoveryCss + questionContentCss
+    style.textContent = backgroundJobCss + recoveryCss + questionContentCss + '\n.dsh-chat-markdown-dialog[role=dialog] { width: min(960px, 100%); }'
     document.head.appendChild(style)
     return () => style.remove()
   })
