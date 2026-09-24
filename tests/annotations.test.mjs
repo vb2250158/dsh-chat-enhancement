@@ -85,6 +85,48 @@ test('refuses changed sessions, claimed commands, busy submission and stale revi
   assert.equal(bare.added.length, 0)
 })
 
+test('reports a rejected generated attachment without touching the draft', () => {
+  const input = { draft: 'existing text', occurrences: [], phase: 'plain', draftRev: 4, attachmentIds: [] }
+  const f = fixture(input)
+  f.conversation.addAttachmentFiles = () => { throw new Error('intake failed') }
+  assert.equal(api.appendAnnotation(f.sessions, f.conversation, 'one', { quote: 'q', note: 'n' }), 'unavailable')
+  assert.equal(input.draft, 'existing text')
+  assert.deepEqual(input.attachmentIds, [])
+})
+
+test('uses the existing picker intake on older DSH builds and releases rejected drafts', () => {
+  const input = { draft: 'existing text', occurrences: [], phase: 'plain', attachmentIds: [] }
+  const f = fixture(input, true, false)
+  const created = []
+  const released = []
+  let accept = true
+  const shell = f.conversation.input.for(f.sessions.scope('one'))
+  shell.addAttachments = ids => {
+    if (!accept) return false
+    input.attachmentIds.push(...ids)
+    return true
+  }
+  f.conversation.createDrafts = (_sessionId, files) => {
+    const drafts = files.map((file, index) => ({ id: `legacy-${index}`, file }))
+    created.push(...drafts)
+    return drafts
+  }
+  f.conversation.releaseDraftAttachments = drafts => { released.push(...drafts) }
+  // The fixture creates a new shell wrapper per lookup; keep the same wrapper
+  // so the plugin and the test observe one input state.
+  f.conversation.input.for = () => shell
+  const annotation = { quote: 'q', note: 'n', target: { msgKey: null, msgKind: null, seq: null } }
+  assert.equal(api.appendAnnotation(f.sessions, f.conversation, 'one', annotation), null)
+  assert.deepEqual(input.attachmentIds, ['legacy-0'])
+  assert.equal(input.draft, 'existing text')
+  assert.equal(created.length, 1)
+  assert.equal(released.length, 0)
+  accept = false
+  assert.equal(api.appendAnnotation(f.sessions, f.conversation, 'one', annotation), 'unavailable')
+  assert.equal(released.length, 1)
+  assert.deepEqual(input.attachmentIds, ['legacy-0'])
+})
+
 test('selection capture rejects collapsed, multi-range and editor selections', () => {
   assert.equal(api.captureAnnotationSelection(null), null)
   assert.equal(api.captureAnnotationSelection({ isCollapsed: true }), null)

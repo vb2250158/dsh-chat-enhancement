@@ -21,14 +21,10 @@ const hooks = registerHooks({
 try {
   const { SessionInputShell } = await import(pathToFileURL(resolve(process.env.DSH_SOURCE_ROOT, 'packages/client/ui-conversation/lib/types/client/input/facade.js')).href)
   const source = await readFile(new URL('../src/annotations.js', import.meta.url), 'utf8')
-  const { appendAnnotation } = vm.runInNewContext(source.replace(/^import .*\r?\n/gmu, '').replace(/^export /gmu, '') + '\n;({appendAnnotation})')
+  const { appendAnnotation } = vm.runInNewContext(source.replace(/^import .*\r?\n/gmu, '').replace(/^export /gmu, '') + '\n;({appendAnnotation})', { File })
   let submissions = 0
   let shell
-  const scope = { bail(subject, event, request) {
-    assert.equal(subject, scope)
-    assert.equal(event, 'slash/input-insert-text')
-    return shell.insertText(request.text, request.span) ? true : undefined
-  } }
+  const scope = {}
   shell = new SessionInputShell({
     actx: scope,
     defaultSink: async () => { submissions++; return { kind: 'success' } },
@@ -42,13 +38,28 @@ try {
     const before = shell.snapshot
     assert.equal(before.occurrences.length, 1)
     const sessions = { list: { getSnapshot: () => ({ current: 'fixture' }) }, scope: () => scope }
-    const conversation = { input: { for: () => shell } }
-    assert.equal(appendAnnotation(sessions, conversation, 'fixture', '选文🙂\n第二段', '第一行意见\n第二行意见'), null)
-    assert.equal(shell.snapshot.draft, `${before.draft}\n\n> 选文🙂\n> 第二段\n\n第一行意见\n第二行意见\n`)
+    const files = []
+    const conversation = {
+      input: { for: () => shell },
+      addAttachmentFiles(sessionId, generated) {
+        assert.equal(sessionId, 'fixture')
+        files.push(...generated)
+        const ids = generated.map((_, index) => `annotation-${index}`)
+        assert.equal(shell.addAttachments(ids), true)
+        return ids
+      },
+    }
+    assert.equal(appendAnnotation(sessions, conversation, 'fixture', {
+      quote: '选文🙂\n第二段', note: '第一行意见\n第二行意见',
+      target: { msgKey: 'fixture:assistant:42', msgKind: 'assistant', seq: 42 },
+    }), null)
+    assert.equal(shell.snapshot.draft, before.draft)
     assert.deepEqual(shell.snapshot.occurrences, before.occurrences)
-    assert.deepEqual(shell.snapshot.attachmentIds, before.attachmentIds)
+    assert.deepEqual(shell.snapshot.attachmentIds, [...before.attachmentIds, 'annotation-0'])
+    assert.equal(files[0].name, '批注-0042.json')
+    assert.equal(JSON.parse(await files[0].text()).note, '第一行意见\n第二行意见')
     assert.equal(submissions, 0)
-    console.log('PASS: real editor appends a Unicode annotation and preserves reference identity and attachments without submitting.')
+    console.log('PASS: real editor accepts a JSON annotation attachment and preserves text and reference identity without submitting.')
   } finally {
     shell.dispose()
   }
