@@ -434,7 +434,7 @@ function ChatEnhancementSettingsSection({ chatSettings }) {
     React.createElement('p', { style: mutedStyle }, '只在当前聊天已打开后，Agent 新完成展示调用时尝试播放；进入聊天或恢复历史消息不会播放。浏览器仍可能阻止未交互页面的有声自动播放。'))
 }
 
-function MarkdownPreviewController({ sessionId, readMarkdown, t }) {
+function MarkdownPreviewController({ sessionId, readMarkdown, getMarkdownPreviewRenderer, t }) {
   const labels = React.useMemo(() => ({ code: { copyLabel: t('markdown.copy'), copiedLabel: t('markdown.copied') }, footnotes: t('markdown.footnotes') }), [t])
   const [preview, setPreview] = React.useState(null)
   React.useEffect(() => {
@@ -455,13 +455,16 @@ function MarkdownPreviewController({ sessionId, readMarkdown, t }) {
     return () => { document.removeEventListener('click', onClick, true) }
   }, [readMarkdown, sessionId])
   if (preview === null) return null
+  const EnhancedMarkdown = getMarkdownPreviewRenderer?.()
   return React.createElement(Modal, { open: true, title: preview.name, closeLabel: t('markdown.close'), className: 'dsh-chat-markdown-dialog', onClose: () => setPreview(null) },
-    React.createElement('div', { 'data-dsh-chat-enhancement-markdown': true, style: { maxHeight: '70vh', overflow: 'auto' } },
+    React.createElement('div', { 'data-dsh-chat-enhancement-markdown': true },
       preview.error !== null
         ? React.createElement('p', { role: 'alert', style: { color: 'var(--dsw-alias-state-error-primary)' } }, `${t('markdown.error')}${preview.error}`)
         : preview.text === null
           ? React.createElement('p', { role: 'status', style: mutedStyle }, t('markdown.loading'))
-          : React.createElement(MarkdownText, { text: preview.text, labels }),
+          : typeof EnhancedMarkdown === 'function'
+            ? React.createElement(EnhancedMarkdown, { text: preview.text, sessionId })
+            : React.createElement(MarkdownText, { text: preview.text, labels }),
     ),
   )
 }
@@ -917,7 +920,7 @@ export async function apply(ctx) {
   ctx.effect(() => ctx.locale.register('chat-enhancement-jobs', backgroundJobLocales))
   ctx.effect(() => {
     const style = document.createElement('style')
-    style.textContent = backgroundJobCss + recoveryCss + questionContentCss + '\n.dsh-chat-markdown-dialog[role=dialog] { width: min(960px, 100%); }'
+    style.textContent = backgroundJobCss + recoveryCss + questionContentCss + '\n.dsh-chat-markdown-dialog[role=dialog] { width: min(1800px, calc(100vw - 32px)); height: calc(100vh - 32px); padding-bottom: 0; gap: 0; }\n.dsh-chat-markdown-dialog[role=dialog] > div { flex: 1; min-height: 0; }\n.dsh-chat-markdown-dialog[role=dialog] > div > div:last-child { flex: 1; min-height: 0; overflow: hidden; margin-top: 0; }\n.dsh-chat-markdown-dialog [data-dsh-chat-enhancement-markdown] { flex: 1; min-height: 0; overflow: auto; }'
     document.head.appendChild(style)
     return () => style.remove()
   })
@@ -958,7 +961,7 @@ export async function apply(ctx) {
   }, MediaAutoplaySessionController))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'chat-enhancement-markdown-preview', order: 100, locale: 'chat-enhancement-annotations',
-    inject: () => ({ readMarkdown }),
+    inject: () => ({ readMarkdown, getMarkdownPreviewRenderer: () => ctx.reflect.get('markdownPreviewRenderer') }),
   }, MarkdownPreviewController))
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock', id: 'chat-enhancement-tool-groups', order: 101,

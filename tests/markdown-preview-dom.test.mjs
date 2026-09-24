@@ -52,6 +52,10 @@ test('Markdown 弹窗使用真实原语渲染代码块、脚注和关闭', { ski
     await React.act(async () => card.click())
     await React.act(async () => document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' })))
     assert.equal(document.querySelector('[role="dialog"]'), null)
+    await React.act(async () => root.render(React.createElement(entry.component, { sessionId: 'one', t, readMarkdown: async () => ({ name: 'SKILL.md', text }), getMarkdownPreviewRenderer: () => ({ text: value }) => React.createElement('div', { 'data-enhanced-markdown': true }, value) })))
+    await React.act(async () => card.click())
+    assert.match(document.querySelector('[data-enhanced-markdown]').textContent, /脚注内容/)
+    assert.match(document.querySelector('style').textContent, /1800px/)
   } finally {
     await React.act(async () => root.unmount())
     for (const dispose of disposers.reverse()) if (typeof dispose === 'function') dispose()
