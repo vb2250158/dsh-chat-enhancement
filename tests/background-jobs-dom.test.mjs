@@ -43,7 +43,7 @@ test('生成的插件使用真实原语显示后台说明，支持开关、会�
       locale: { register(name, values) { dictionaries.set(name, values); return () => dictionaries.delete(name) } },
       remote: { async $mount() { return () => {} } },
       get: () => ({}),
-      settingsScope: { bind: () => chatSettings },
+      configForms: { get: () => chatSettings },
       reflect: { provide: () => () => {}, get: () => ({ read() {} }) },
       slots: { inject(_name, callback) { callback() }, register(options, component) { registrations.push({ options, component }); return () => {} } },
     })

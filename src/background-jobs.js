@@ -84,7 +84,7 @@ export function BackgroundJobList({ sessionId, useSessions, useTrajectory, chatS
     anchor: React.createElement(Button, {
       variant: 'ghost', size: 'sm', 'aria-label': count, 'aria-haspopup': 'menu', 'aria-expanded': open,
       onClick: () => { setNow(Date.now()); setOpen(value => !value) },
-    }, liveCount > 0 ? React.createElement(StateDot, { state: 'ongoing' }) : null, count, React.createElement(IconChevronDownOutline14)),
+    }, liveCount > 0 ? React.createElement(StateDot, { state: 'ongoing' }) : null, count, React.createElement(IconChevronDownOutlineRegular)),
   })
 }
 

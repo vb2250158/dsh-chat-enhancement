@@ -35,7 +35,7 @@ test('Markdown 弹窗使用真实原语渲染代码块、脚注和关闭', { ski
     const registrations = []
     const dictionaries = new Map()
     const slots = { inject(_key, fn) { fn() }, register(options, component) { registrations.push({ options, component }); return () => {} } }
-    await chat.apply({ slots, effect(fn) { disposers.push(fn()) }, locale: { register(name, values) { dictionaries.set(name, values); return () => {} } }, remote: { async $mount() { return () => {} } }, get: () => ({}), settingsScope: { bind: () => ({}) }, reflect: { provide: () => () => {}, get: () => ({ read() {} }) } })
+    await chat.apply({ slots, effect(fn) { disposers.push(fn()) }, locale: { register(name, values) { dictionaries.set(name, values); return () => {} } }, remote: { async $mount() { return () => {} } }, get: () => ({}), configForms: { get: () => ({}) }, reflect: { provide: () => () => {}, get: () => ({ read() {} }) } })
     const entry = registrations.find(x => x.options.id === 'chat-enhancement-markdown-preview')
     const t = key => dictionaries.get(entry.options.locale).zh[key]
     const text = '# 标题\n\n```js\nconst preview = true\n```\n\n正文[^a]\n\n[^a]: 脚注内容'

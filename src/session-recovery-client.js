@@ -20,8 +20,8 @@ const recoveryResultSchema = { parse(value) {
 } }
 export const recoveryDescriptor = {
   id: 'dsh-chat-enhancement#chatRecovery/read', service: 'chatRecovery', namespace: 'chatRecovery', method: 'read', invocation: { kind: 'direct' },
-  parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatRecoveryRequest', schema: recoveryRequestSchema } }],
-  result: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatRecoveryResult', schema: recoveryResultSchema },
+  parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatRecoveryRequest', create: () => (recoveryRequestSchema) } }],
+  result: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatRecoveryResult', create: () => (recoveryResultSchema) },
 }
 
 /** 仅勾选触发恢复；检查失败和部分失败保留同一行重试入口。 */

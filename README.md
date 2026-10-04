@@ -1,5 +1,7 @@
 # DSH Chat Enhancement
 
+This release requires DSH 0.2.1-alpha.1 or a compatible 0.2 release. See [compatibility details](docs/dsh-0.2-compatibility.md).
+
 ## 0.3.55：Markdown 弹窗流程图与大视图
 
 文件引用中的 Markdown 弹窗优先使用 Markdown 增强插件的完整渲染器，流程图可切换图形与源码并缩放；未安装 Markdown 增强时保留通用 Markdown 预览。弹窗默认占据接近整个窗口，文档内容独立滚动。配套 Markdown 增强 0.1.7。

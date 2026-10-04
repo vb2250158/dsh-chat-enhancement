@@ -34,7 +34,7 @@ async function loadBrowserPlugin() {
   return loaderEntry.factory((name) => {
     if (name === '@deepseek-ai/dsh-client-ui-goal') return {}
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutline14() {} }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutlineRegular() {} }
     throw new Error(`unexpected browser dependency: ${name}`)
   })
 }
@@ -49,7 +49,7 @@ async function loadBrowserHelpers() {
   return loaderEntry.factory((name) => {
     if (name === '@deepseek-ai/dsh-client-ui-goal') return {}
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutline14() {} }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutlineRegular() {} }
     throw new Error(`unexpected browser dependency: ${name}`)
   })
 }
@@ -87,7 +87,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /切换为悬浮预览/)
   assert.match(client, /followingLatest/)
   assert.match(client, /imageGallery\(sessionId\)\.at\(-1\)/)
-  assert.match(client, /settingsScope/)
+  assert.match(client, /configForms/)
   // 本插件只占一个设置导航项：id `chat-enhancement`，标签「对话增强」。
   assert.match(client, /id: 'chat-enhancement', order: 65, label: \(\) => '对话增强'/)
   assert.match(client, /ChatEnhancementSettingsSection/)
@@ -100,7 +100,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   // 原生 <select> 的弹层由系统绘制，`--dsw-*` 令牌管不到它，所以必须走 Menu 原语。
   assert.doesNotMatch(client, /createElement\('select'/)
   assert.doesNotMatch(client, /languageSelectStyle/)
-  assert.match(client, /const \{ CodeBlock, MarkdownText, Modal, Button, Menu, IconChevronDownOutline14, StateDot, Tooltip, Switch \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
+  assert.match(client, /const \{ CodeBlock, MarkdownText, Modal, Button, Menu, IconChevronDownOutlineRegular, StateDot, Tooltip, Switch \} = require\('@deepseek-ai\/dsh-client-ui-primitives'\)/)
   assert.match(client, /variant: 'outline'/)
   assert.match(client, /aria-haspopup': 'menu'/)
   assert.match(client, /audioAutoplay/)
@@ -144,7 +144,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(host, /chatMarkdown/)
   assert.doesNotMatch(host, /ctx\.fs\.contains/)
   assert.match(host, /maxMarkdownBytes/)
-  assert.match(host, /settingsCtx\.settings\.register\(CHAT_ENHANCEMENT_SETTINGS_NAMESPACE/)
+  assert.match(host, /settingsCtx\.settings\.configure/)
   assert.match(host, /audioAutoplay: z\.boolean\(\)\.default\(false\)/)
   assert.match(host, /videoAutoplay: z\.boolean\(\)\.default\(false\)/)
   assert.match(host, /language: z\.string\(\)\.default\(AUTO_LANGUAGE\)/)
@@ -284,9 +284,9 @@ test('client groups original tool and context rows without replacing the tool-ca
       inject(_name, callback) { callback() },
       register(options, component) { registrations.push({ options, component }); return () => {} },
     },
-    settingsScope: {
-      bind(spec) {
-        assert.equal(spec.namespace, 'chat-enhancement')
+    configForms: {
+      get(entryId) {
+        assert.equal(entryId, 'chat-enhancement')
         return {
           getSnapshot() { return { status: 'ready', value: { audioAutoplay: false, videoAutoplay: false }, writable: true } },
           subscribe() { return () => {} },
@@ -297,7 +297,7 @@ test('client groups original tool and context rows without replacing the tool-ca
   }
 
   await plugin.apply(context)
-  assert.ok(plugin.inject.includes('settingsScope'))
+  assert.ok(plugin.inject.includes('configForms'))
   const jobList = registrations.find(({ options }) => options.id === 'job-list')
   assert.equal(jobList.options.name, 'conversation.session.header.actions')
   assert.equal(jobList.options.priority, 100)
@@ -510,7 +510,7 @@ async function loadAutoExpandHelpers() {
   return loaderEntry.factory((name) => {
     if (name === '@deepseek-ai/dsh-client-ui-goal') return {}
     if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutline14() {} }
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutlineRegular() {} }
     throw new Error(`unexpected browser dependency: ${name}`)
   })
 }
@@ -674,10 +674,10 @@ test('the latest assistant text is read from the session surface, skipping empty
 
 test('anchors are identified by their plugin source, not by content', async () => {
   const { isLanguageAnchor } = await import(new URL('./lib/index.js', root))
-  assert.equal(isLanguageAnchor({ source: { kind: 'plugin', plugin: 'chat-enhancement-language-anchor' } }), true)
+  assert.equal(isLanguageAnchor({ source: { kind: 'plugin:chat-enhancement-language-anchor' } }), true)
   // 普通用户消息、别的插件、以及我们自己别的注入都不算锚点。
   assert.equal(isLanguageAnchor({ source: { kind: 'user' } }), false)
-  assert.equal(isLanguageAnchor({ source: { kind: 'plugin', plugin: 'other' } }), false)
+  assert.equal(isLanguageAnchor({ source: { kind: 'plugin:other' } }), false)
   assert.equal(isLanguageAnchor({ source: { kind: 'agent-instructions' } }), false)
   assert.equal(isLanguageAnchor({}), false)
   assert.equal(isLanguageAnchor(null), false)

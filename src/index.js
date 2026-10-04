@@ -1,5 +1,6 @@
 /** Host entry for the chat-enhancement DSH bundle. */
 
+import z from '@deepseek-ai/schemastery'
 import { randomUUID } from 'node:crypto'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
@@ -414,7 +415,7 @@ function registerLanguageAnchor(settingsCtx, settings) {
     const { createUserMessage } = profileRequire()('@deepseek-ai/dsh-llm')
     const message = createUserMessage({
       content: [{ type: 'text', text }],
-      source: { kind: 'plugin', plugin: 'chat-enhancement-language-anchor' },
+      source: { kind: 'plugin:chat-enhancement-language-anchor' },
     })
     // Keep the anchor last: the rule belongs immediately before the model, and
     // re-inserting an identical payload would otherwise pile up one per step.
@@ -424,8 +425,7 @@ function registerLanguageAnchor(settingsCtx, settings) {
 }
 
 /** Identity test for the anchor messages this plugin injects. */
-export const isLanguageAnchor = message => message?.source?.kind === 'plugin'
-  && message?.source?.plugin === 'chat-enhancement-language-anchor'
+export const isLanguageAnchor = message => message?.source?.kind === 'plugin:chat-enhancement-language-anchor'
 
 /**
  * Register the plugin's settings namespace, the model-language prompt section,
@@ -437,26 +437,11 @@ export const isLanguageAnchor = message => message?.source?.kind === 'plugin'
  * restart. `auto` resolves to empty text, which `renderPrompt` drops, so an
  * unconfigured deployment assembles the exact prompt it had before.
  */
-function registerSettings(ctx) {
+function registerSettings(ctx, config) {
   ctx.inject(['systemPrompt', 'settings'], (settingsCtx) => {
     const z = profileRequire()('@deepseek-ai/schemastery')
-    const settings = settingsCtx.settings.register(CHAT_ENHANCEMENT_SETTINGS_NAMESPACE, z.object({
-      audioAutoplay: z.boolean().default(false),
-      videoAutoplay: z.boolean().default(false),
-      // Purely presentational: the browser half drives DSH's own Think-row
-      // disclosure while reasoning streams. The Host only persists it, because
-      // a browser-local store would not survive a reload or reach another tab.
-      expandReasoningWhileRunning: z.boolean().default(false),
-      reasoningCollapseDelayMs: z.number().min(0).step(1).default(3000),
-      codeReferenceHighlightMs: z.number().min(100).max(10000).step(1).default(1600),
-      language: z.string().default(AUTO_LANGUAGE),
-      // The allowed ids come from the shared catalog, so the browser picker and
-      // this validator cannot disagree about what a valid mode is. The Host
-      // still falls back through `languageAnchorMode` for hand-edited documents,
-      // because schemastery rejects an unknown value rather than defaulting it.
-      languageAnchor: z.union(LANGUAGE_ANCHOR_MODES.map(mode => z.const(mode.id))).default(DEFAULT_ANCHOR_MODE),
-      toolDescriptions: z.boolean().default(true),
-    }))
+    settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, ctx.fiber))
+    const settings = { get: () => Object.fromEntries(Object.entries(CHAT_SETTINGS_FIELDS).map(([key]) => [key, config[key].get()])) }
     settingsCtx.systemPrompt.section({
       name: 'private:chat-enhancement-code-references',
       order: 9040,
@@ -535,7 +520,7 @@ export function apply(ctx, config = {}) {
   })
   recoveryConfig(config)
   const resolved = resolveConfig(config)
-  registerSettings(ctx)
+  registerSettings(ctx, config)
   const mediaStore = new MediaStore(resolved.maxAudioBytes, resolved.maxVideoBytes)
   const protocol = profileProtocol()
   ctx.inject(['sessionQuery', 'sessionController', 'subagents', 'goals'], scope => installSessionRecovery(scope, protocol, config))
@@ -550,3 +535,33 @@ export function apply(ctx, config = {}) {
     new ChatMarkdownService(ctx)
   })
 }
+
+const CHAT_SETTINGS_FIELDS = {
+      audioAutoplay: z.boolean().default(false).volatile(),
+      videoAutoplay: z.boolean().default(false).volatile(),
+      // Purely presentational: the browser half drives DSH's own Think-row
+      // disclosure while reasoning streams. The Host only persists it, because
+      // a browser-local store would not survive a reload or reach another tab.
+      expandReasoningWhileRunning: z.boolean().default(false).volatile(),
+      reasoningCollapseDelayMs: z.number().min(0).step(1).default(3000).volatile(),
+      codeReferenceHighlightMs: z.number().min(100).max(10000).step(1).default(1600).volatile(),
+      language: z.string().default(AUTO_LANGUAGE).volatile(),
+      // The allowed ids come from the shared catalog, so the browser picker and
+      // this validator cannot disagree about what a valid mode is. The Host
+      // still falls back through `languageAnchorMode` for hand-edited documents,
+      // because schemastery rejects an unknown value rather than defaulting it.
+      languageAnchor: z.union(LANGUAGE_ANCHOR_MODES.map(mode => z.const(mode.id))).default(DEFAULT_ANCHOR_MODE).volatile(),
+      toolDescriptions: z.boolean().default(true).volatile(),
+    }
+
+/** Live preferences and ordinary deployment tool/recovery limits. */
+export const Config = z.object({
+  ...CHAT_SETTINGS_FIELDS,
+  maxAudioBytes: z.number().min(1).step(1).default(DEFAULT_MAX_AUDIO_BYTES),
+  maxVideoBytes: z.number().min(1).step(1).default(DEFAULT_MAX_VIDEO_BYTES),
+  maxMarkdownBytes: z.number().min(1).step(1).default(DEFAULT_MAX_MARKDOWN_BYTES),
+  recoveryAutoResume: z.boolean().default(true),
+  recoveryLookbackMs: z.number().min(1).step(1).default(3600000),
+  recoveryPollIntervalMs: z.number().min(1).step(1).default(1500),
+  recoveryReadTimeoutMs: z.number().min(1).step(1).default(30000),
+})

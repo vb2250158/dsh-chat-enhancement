@@ -366,7 +366,7 @@ function SettingPicker({ chatSettings, field, selected, items, labelOf, ariaLabe
       onClick: () => { setOpen(value => !value) },
     }, React.createElement('span', { style: languageTriggerContentStyle },
       React.createElement('span', { style: languageTriggerLabelStyle }, activeLabel),
-      React.createElement(IconChevronDownOutline14))),
+      React.createElement(IconChevronDownOutlineRegular))),
   })
 }
 
@@ -898,17 +898,17 @@ const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
   recoveryDescriptor,
   {
     id: 'dsh-chat-enhancement#chatMedia/read', service: 'chatMedia', namespace: 'chatMedia', method: 'read', invocation: { kind: 'direct' },
-    parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMediaRequest', schema: requestSchema } }],
-    result: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMediaResult', schema: resultSchema },
+    parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMediaRequest', create: () => (requestSchema) } }],
+    result: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMediaResult', create: () => (resultSchema) },
   },
   {
     id: 'dsh-chat-enhancement#chatMarkdown/read', service: 'chatMarkdown', namespace: 'chatMarkdown', method: 'read', invocation: { kind: 'direct' },
-    parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMarkdownRequest', schema: markdownRequestSchema } }],
-    result: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMarkdownResult', schema: markdownResultSchema },
+    parameters: [{ name: 'request', wire: 'request', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMarkdownRequest', create: () => (markdownRequestSchema) } }],
+    result: { mode: 'strict', typeSymbol: 'dsh-chat-enhancement#ChatMarkdownResult', create: () => (markdownResultSchema) },
   },
 ] }
 
-export const inject = ['slots', 'sessions', 'remote', 'remote.goals', 'settingsScope', 'conversation', 'locale', 'modelDirectories', 'sidebarRight']
+export const inject = ['slots', 'sessions', 'remote', 'remote.goals', 'configForms', 'conversation', 'locale', 'modelDirectories', 'sidebarRight']
 
 export async function apply(ctx) {
   ctx.effect(() => ctx.locale.register('chat-enhancement-question-content', questionContentLocales))
@@ -937,7 +937,7 @@ export async function apply(ctx) {
     locale: 'chat-enhancement-recovery', inject: () => ({ readRecovery }),
   }, SessionRecoveryPrompt))
   const sessions = ctx.get('sessions')
-  const chatSettings = ctx.settingsScope.bind({ namespace: 'chat-enhancement' })
+  const chatSettings = ctx.configForms.get('chat-enhancement' )
   installCodeReferences(ctx, chatSettings)
   ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
     name: 'conversation.session.header.actions', id: 'job-list', priority: 100, order: 20,

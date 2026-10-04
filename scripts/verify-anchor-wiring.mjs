@@ -106,7 +106,7 @@ const drifted = await runStep(3, ['好的，先看看。', 'Now let me read the 
 const clean = await runStep(3, ['好的，先看看。', '已读取路由配置并核对了允许的根目录。'])
 
 check('a drifted step gains exactly one message', drifted.messages.length, 1)
-check('the anchor is plugin-sourced', drifted.messages[0]?.source, { kind: 'plugin', plugin: 'chat-enhancement-language-anchor' })
+check('the anchor is plugin-sourced', drifted.messages[0]?.source, { kind: 'plugin:chat-enhancement-language-anchor' })
 check('the anchor is written in the target language', drifted.messages[0]?.content?.[0]?.text?.startsWith('继续用简体中文'), true)
 check('a clean step gains nothing', clean.messages.length, 0)
 check('the decision kind is preserved', drifted.kind, 'enter')
