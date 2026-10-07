@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.3.57",
+  "version": "0.3.58",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
   "main": "lib/index.js",
@@ -9,7 +9,11 @@
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./typert": "./lib/typert.host.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./image-attachments/locale/*.json": "./locale/image-attachments/*.json",
+    "./image-attachments/icon": "./image-attachments.svg"
   },
   "dsh": {
     "client": {
@@ -72,7 +76,11 @@
     "src/goal-metrics.js",
     "src/code-references.js",
     "src/code-references-client.js",
-    "docs"
+    "docs",
+    "locale",
+    "icon.svg",
+    "ICON_LICENSE.txt",
+    "image-attachments.svg"
   ],
   "scripts": {
     "build:client": "node scripts/build-client.mjs",
@@ -82,5 +90,6 @@
     "type": "git",
     "url": "git+https://github.com/vb2250158/dsh-chat-enhancement.git"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "icon": "./icon.svg"
 }

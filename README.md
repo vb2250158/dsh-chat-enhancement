@@ -323,3 +323,7 @@ DOM 测试使用已有开发依赖：将 `DSH_TEST_DEPENDENCY_ROOT` 指向能够
 ## 许可证
 
 MIT。
+
+## Plugin display metadata
+
+The plugin list shows **Chat enhancements** in English and **聊天增强** in Chinese, following the DSH interface language. `locale/en.json` and `locale/zh.json` provide the title and description; `icon.svg` supplies self-contained artwork. The package exports and publishes these resources. The icon is adapted from Lucide; see [ICON_LICENSE.txt](ICON_LICENSE.txt).
