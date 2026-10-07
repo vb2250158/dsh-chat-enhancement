@@ -74,7 +74,7 @@ test('生成的插件使用真实原语显示后台说明，支持开关、会�
     render()
     assert.equal(document.querySelector('[role="menu"]'), null)
     assert.equal(document.querySelector('#app button'), null)
-    const settings = registrations.find(item => item.options.id === 'chat-enhancement' && item.options.name === 'settings.section')
+    const settings = registrations.find(item => item.options.key === 'dsh-chat-enhancement' && item.options.name === 'plugins.bundle.config')
     React.act(() => root.render(React.createElement(settings.component, { chatSettings })))
     const switches = [...document.querySelectorAll('[role="switch"]')]
     assert.equal(switches.length, 4)

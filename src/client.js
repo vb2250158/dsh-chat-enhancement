@@ -1004,10 +1004,9 @@ export async function apply(ctx) {
       }
     },
   }, TurnModelAction))
-  // 一个导航项装下本插件的全部偏好：语言在上，媒体展示在下。
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section', id: 'chat-enhancement', order: 65, label: () => '对话增强',
-    inject: () => ({ chatSettings }),
+  // All chat preferences are configured from this bundle’s Plugins page.
+  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+    name: 'plugins.bundle.config', key: 'dsh-chat-enhancement', inject: () => ({ chatSettings }),
   }, ChatEnhancementSettingsSection))
   // `read_image` is already rendered by DSH's built-in read-image toolview.
   // Registering it here causes the keyed slot to reject the whole custom

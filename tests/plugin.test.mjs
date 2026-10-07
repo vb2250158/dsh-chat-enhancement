@@ -88,8 +88,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /followingLatest/)
   assert.match(client, /imageGallery\(sessionId\)\.at\(-1\)/)
   assert.match(client, /configForms/)
-  // 本插件只占一个设置导航项：id `chat-enhancement`，标签「对话增强」。
-  assert.match(client, /id: 'chat-enhancement', order: 65, label: \(\) => '对话增强'/)
+  assert.ok(manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-ui-plugin-manager'))
   assert.match(client, /ChatEnhancementSettingsSection/)
   // 语言与漂移提醒两行都走同一个枚举选择器；断言到驱动它的 field，
   // 而不是组件名——组件是内部实现，重命名不该让这条契约失败。
@@ -314,11 +313,10 @@ test('client groups original tool and context rows without replacing the tool-ca
   assert.equal(thinkingController.component.name, 'ThinkingGroupController')
   const audioView = registrations.find(({ options }) => options.key === 'show_audio')
   assert.equal(audioView.options.name, 'tool.call.toolview')
-  // 本插件在设置菜单里只注册一个分区：全部偏好都装在「对话增强」里面。
-  const sections = registrations.filter(({ options }) => options.name === 'settings.section')
+  assert.equal(registrations.filter(({ options }) => options.name === 'settings.section').length, 0)
+  const sections = registrations.filter(({ options }) => options.name === 'plugins.bundle.config')
   assert.equal(sections.length, 1)
-  assert.equal(sections[0].options.id, 'chat-enhancement')
-  assert.equal(sections[0].options.label(), '对话增强')
+  assert.equal(sections[0].options.key, 'dsh-chat-enhancement')
   assert.equal(sections[0].component.name, 'ChatEnhancementSettingsSection')
 })
 
