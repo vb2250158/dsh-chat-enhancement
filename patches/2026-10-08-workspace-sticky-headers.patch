@@ -1,0 +1,113 @@
+diff --git a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
+--- a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
++++ b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx
+@@ -459,7 +459,7 @@
+     // (WorkspaceBrowser.module.css).
+       <div
+         key={group.key}
+-        style={{ '--dsh-workspace-indent': `${depth * 12}px` } as CSSProperties}
++        style={{ '--dsh-workspace-indent': `${depth * 12}px`, '--dsh-workspace-depth': depth } as CSSProperties}
+         className={clsx(
+           css.groupSection,
+           workspaceMarker === 'before' && css.workspaceDropBefore,
+@@ -493,38 +493,40 @@
+             }
+           }}
+       >
+-        <ProjectRowItem
+-          newShortcut={shortcuts.find(row => row.id === 'session.new')}
+-          group={group}
+-          containsCurrentDescendant={currentAncestors.has(group.key)}
+-          home={home}
+-          t={t}
+-          onToggle={() => {
+-            if (group.expanded) {
+-              setSessionLimits(limits => ({ ...limits, [group.key]: COLLAPSED_SESSION_LIMIT }))
+-            }
+-            setGroupExpanded(group.key, !group.expanded)
+-          }}
+-          onCreate={() => {
+-            if (group.workspaceId !== undefined) {
+-              setGroupExpanded(group.key, true)
+-              startSession(group.workspaceId)
+-            }
+-          }}
+-          drag={workspaceDragProps}
+-          actions={group.workspaceId === undefined
+-            ? undefined
+-            : {
+-              rename: () => {
+-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+-                if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
+-              },
+-              delete: () => {
+-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+-                if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
+-              },
++        <div className={css.groupHeader} data-dsh-workspace-header={group.key}>
++          <ProjectRowItem
++            newShortcut={shortcuts.find(row => row.id === 'session.new')}
++            group={group}
++            containsCurrentDescendant={currentAncestors.has(group.key)}
++            home={home}
++            t={t}
++            onToggle={() => {
++              if (group.expanded) {
++                setSessionLimits(limits => ({ ...limits, [group.key]: COLLAPSED_SESSION_LIMIT }))
++              }
++              setGroupExpanded(group.key, !group.expanded)
+             }}
+-        />
++            onCreate={() => {
++              if (group.workspaceId !== undefined) {
++                setGroupExpanded(group.key, true)
++                startSession(group.workspaceId)
++              }
++            }}
++            drag={workspaceDragProps}
++            actions={group.workspaceId === undefined
++              ? undefined
++              : {
++                rename: () => {
++                /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
++                  if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
++                },
++                delete: () => {
++                /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
++                  if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
++                },
++              }}
++          />
++        </div>
+         {childRows.length > 0 && (
+           <div role="group">
+             {childRows}
+diff --git a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.module.css b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.module.css
+--- a/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.module.css
++++ b/packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.module.css
+@@ -442,6 +442,14 @@
+ /* One workspace section: header row + a compact expanded session run. */
+ .groupSection {
+   position: relative;
++}
++
++/* Keep the original controls above sessions; descendants sit below ancestors. */
++.groupHeader {
++  position: sticky;
++  top: calc(var(--dsh-workspace-depth, 0) * 36px);
++  z-index: calc(100 - var(--dsh-workspace-depth, 0));
++  background: var(--dsw-specific-sidebar-fill);
+ }
+ 
+ .groupSection + .groupSection {
+diff --git a/packages/client/ui-workspace/src/client/rows/Rows.module.css b/packages/client/ui-workspace/src/client/rows/Rows.module.css
+--- a/packages/client/ui-workspace/src/client/rows/Rows.module.css
++++ b/packages/client/ui-workspace/src/client/rows/Rows.module.css
+@@ -9,6 +9,7 @@
+   cursor: pointer;
+   user-select: none;
+   color: var(--dsw-alias-label-primary);
++  scroll-margin-top: calc((var(--dsh-workspace-depth, 0) + 1) * 36px);
+ }
+ 
+ .projectRow:hover,
