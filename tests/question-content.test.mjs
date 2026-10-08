@@ -7,11 +7,12 @@ import vm from 'node:vm'
 import test from 'node:test'
 
 const sourceRoot = process.env.DSH_SOURCE_ROOT
-test('两个生成插件通过公开插槽显示问题及选项图文，保留选择、提交和失败回退', { skip: !sourceRoot }, async () => {
+for (const [url, localImages] of [['https://harness.test/', true], ['dsh-app://app/', true], ['dsh-app://shell/', false]]) {
+test(`问题及选项图文保留选择、提交和失败回退 (${url})`, { skip: !sourceRoot }, async () => {
   const require = createRequire(resolve(sourceRoot, 'packages/client/ui-primitives/package.json'))
   const React = require('react')
   const { JSDOM } = require('jsdom')
-  const dom = new JSDOM('<!doctype html><div id="app"></div>', { url: 'https://harness.test/', pretendToBeVisual: true })
+  const dom = new JSDOM('<!doctype html><div id="app"></div>', { url, pretendToBeVisual: true })
   const globals = { window: dom.window, document: dom.window.document, navigator: dom.window.navigator, HTMLElement: dom.window.HTMLElement, Node: dom.window.Node, IS_REACT_ACT_ENVIRONMENT: true }
   const old = Object.fromEntries(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]))
   for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
@@ -23,7 +24,7 @@ test('两个生成插件通过公开插槽显示问题及选项图文，保留�
   const disposers = []
   try {
     const base = resolve(sourceRoot, 'packages/client/ui-primitives/lib/types')
-    const primitives = Object.assign({}, ...await Promise.all(['Button.js', 'markdown/MarkdownText.js', 'icons/index.js'].map(file => import(pathToFileURL(resolve(base, file)).href))))
+    const primitives = await import(pathToFileURL(resolve(base, 'index.js')).href)
     const load = async file => {
       let result
       const win = Object.create(dom.window)
@@ -51,9 +52,13 @@ test('两个生成插件通过公开插槽显示问题及选项图文，保留�
       React.createElement(dock.component, { sessionId, send: async text => sent.push(text), ...(enabled ? { renderSlot } : {}) })))
     await React.act(async () => mount())
     const projection = { images: [...document.querySelectorAll('img')].map(x => ({ alt: x.alt, src: x.src })), choices: [...document.querySelectorAll('[role="radio"]')].map(x => x.getAttribute('aria-label')) }
-    assert.deepEqual(projection, JSON.parse(await readFile(new URL('./fixtures/question-images.expected.json', import.meta.url), 'utf8')))
-    assert.equal(document.querySelectorAll('img').length, 3)
-    assert.equal(document.querySelector('img[alt="细节"]').src, 'https://harness.test/api/file?path=C%3A%2Fmock%20folder%2Fdetail.png')
+    const expected = JSON.parse(await readFile(new URL('./fixtures/question-images.expected.json', import.meta.url), 'utf8'))
+    expected.images = expected.images.filter(image => localImages || image.alt !== '细节').map(image => ({
+      ...image, src: image.src.replace('https://harness.test/', url),
+    }))
+    assert.deepEqual(projection, expected)
+    assert.equal(document.querySelectorAll('img').length, localImages ? 3 : 2)
+    assert.equal(document.querySelector('img[alt="细节"]')?.src, localImages ? `${url}api/file?path=C%3A%2Fmock%20folder%2Fdetail.png` : undefined)
     assert.match(document.body.textContent, /选项前.*选项后/su)
     assert.equal(document.querySelector('button button, button a, button img'), null, '富文本不嵌入选择按钮')
     await React.act(async () => mount('one', false))
@@ -86,3 +91,4 @@ test('两个生成插件通过公开插槽显示问题及选项图文，保留�
     for (const [key, descriptor] of Object.entries(old)) if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]
   }
 })
+}

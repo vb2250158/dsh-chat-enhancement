@@ -4,10 +4,12 @@ import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** 映射绝对文件路径；相对路径、UNC 和其它协议保持惰性文本。 */
 export function questionImageUrl(value, location) {
-  if (!['http:', 'https:'].includes(location.protocol)) return undefined
+  const desktop = location.protocol === 'dsh-app:' && location.hostname === 'app'
+  if (!['http:', 'https:'].includes(location.protocol) && !desktop) return undefined
   if (typeof value !== 'string' || /[\u0000-\u001f]/u.test(value)) return undefined
   if (!(value.startsWith('/') && !value.startsWith('//')) && !/^[a-z]:[\\/]/iu.test(value)) return undefined
-  return `${location.origin}/api/file?path=${encodeURIComponent(value)}`
+  const base = desktop ? 'dsh-app://app' : location.origin
+  return `${base}/api/file?path=${encodeURIComponent(value)}`
 }
 
 export const questionContentLocales = {

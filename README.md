@@ -1,5 +1,9 @@
 # DSH Chat Enhancement
 
+## 0.3.67：Desktop 提问图片
+
+提问图文中的绝对本地路径通过 Web 或 Desktop 自身的 `/api/file` 路由读取。Desktop 仅接受 `dsh-app://app`，不使用原始 Host 地址或复制认证信息。问题选择、提交及图片失败回退保持一致。
+
 This release requires DSH 0.2.1-alpha.1 or a compatible 0.2 release. See [compatibility details](docs/dsh-0.2-compatibility.md).
 
 ## 0.3.64：自动重命名

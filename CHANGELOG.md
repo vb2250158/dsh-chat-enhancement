@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.67 (2026-10-08)
+
+- 提问图文中的本地图片支持 Desktop 的 `dsh-app://app`，仍拒绝 Shell 页面、相对路径和危险协议。
+- Local question images use the Desktop application's authenticated file route; shell pages, relative paths and unsafe schemes remain rejected.
+
 ## 0.3.66 (2026-10-08)
 
 - 使用标题服务已有的用户输入聚合判断空会话，列名读取现有投影候选；写前仍复核当前标题，避免批量列名重复载入旧日志。

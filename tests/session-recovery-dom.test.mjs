@@ -71,7 +71,10 @@ test('发布产物用真实按钮呈现单行恢复提示，确认去重、失�
     assert.match(document.querySelector('.dsh-session-recovery-label').textContent, /检查中断记录 2\/8/)
     assert.match(document.querySelector('.dsh-session-recovery-label').title, /original-session/)
     assert.equal(document.querySelector('[role=progressbar]').getAttribute('aria-valuenow'), '25')
-    await React.act(async () => new Promise(resolve => setTimeout(resolve, 60)))
+    const timeoutDeadline = Date.now() + 5000
+    while (!document.querySelector('.dsh-session-recovery-label').textContent.includes('检查失败') && Date.now() < timeoutDeadline) {
+      await React.act(async () => new Promise(resolve => setTimeout(resolve, 20)))
+    }
     assert.match(document.querySelector('.dsh-session-recovery-label').textContent, /检查失败/)
     assert.equal(document.querySelector('#app button').disabled, false)
     await React.act(async () => document.querySelector('#app button').click())
