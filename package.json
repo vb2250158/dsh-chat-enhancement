@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.3.65",
+  "version": "0.3.66",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
   "main": "lib/index.js",
@@ -56,7 +56,8 @@
     "@deepseek-ai/dsh-client-ui-session": ">=0.2.1-alpha.1 <0.3.0",
     "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.2.1-alpha.1 <0.3.0",
     "@deepseek-ai/dsh-session-title-llm": ">=0.2.1-alpha.1 <0.3.0",
-    "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.1-alpha.1 <0.3.0"
+    "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.1-alpha.1 <0.3.0",
+    "@deepseek-ai/dsh-session-projection": ">=0.2.1-alpha.1 <0.3.0"
   },
   "files": [
     "scripts/recover-sessions.mjs",

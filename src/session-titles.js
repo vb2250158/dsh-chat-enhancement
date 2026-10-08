@@ -22,15 +22,10 @@ export class SessionTitles {
 
   async list() {
     const { items } = await this.ctx.sessionController.list({})
-    const candidates = items.filter(item => isUnnamedTitle(item.projections?.values?.title))
-    const results = await this.ctx.sessionQuery.readTitleSnapshots(candidates.map(item => item.sessionId))
-    const observed = new Map(results.map(result => [result.sessionId, result]))
     return { items: items.map(item => {
-      const result = observed.get(item.sessionId)
-      if (result?.status === 'rejected') return { sessionId: item.sessionId, error: String(result.reason?.message || result.reason) }
-      const session = result?.value.session
-      const title = result?.value.title?.title ?? item.projections?.values?.title ?? ''
-      return { sessionId: item.sessionId, cwd: session?.cwd || item.cwd || '', createdAt: session?.createdAt || 0, parentSession: session?.parentSession || item.parentSessionId || '', title, unnamed: isUnnamedTitle(title) }
+      const session = this.ctx.sessions.get(item.sessionId)
+      const title = session ? this.ctx.sessionTitle.get(session)?.title ?? '' : item.projections?.values?.title ?? ''
+      return { sessionId: item.sessionId, cwd: session?.header.cwd || item.cwd || '', createdAt: session?.header.createdAt, parentSession: session?.header.parentSession || item.parentSessionId || '', title, unnamed: isUnnamedTitle(title) }
     }) }
   }
 
@@ -52,10 +47,9 @@ export class SessionTitles {
     }
     const before = this.ctx.sessionTitle.get(session)
     if (request.onlyUnnamed && !isUnnamedTitle(before?.title)) return { sessionId: session.id, title: before.title, kind: 'retained' }
-    const observation = await this.ctx.sessionQuery.observeSession(session.id)
-    let human
-    try { human = observation.events.some(event => event.type === 'user/message' && event.data.source.kind === 'user' && event.data.content.some(block => block.type === 'text' && block.text.trim())) }
-    finally { observation[Symbol.dispose]() }
+    const input = this.ctx.sessionProjections.stateOf(session, 'titleInput')
+    if (input === undefined) throw new Error('Session title input projection is unavailable')
+    const human = input.count > 0
     let accepted
     if (!human) accepted = this.ctx.sessionTitle.rename(session, emptySessionTitle(session.header, this.timeZone))
     else {

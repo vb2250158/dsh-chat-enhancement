@@ -5,10 +5,10 @@ import { emptySessionTitle, isUnnamedTitle, SessionTitles } from '../src/session
 function fixture({ human = false, title, refresh } = {}) {
   const session = { id: 'session-fixture', header: { id: 'session-fixture', cwd: 'C:/Projects/PangHu', createdAt: Date.UTC(2026, 9, 2, 10, 50) } }
   const events = human ? [{ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '修复登录' }] } }] : []
-  let releases = 0
   let state = title ? { title, source: { kind: 'user' } } : undefined
   let writes = 0, resolves = 0
   const ctx = {
+    sessionProjections: { stateOf(_, key) { assert.equal(key, 'titleInput'); return { count: human ? 1 : 0 } } },
     sessions: { get: () => session },
     sessionController: {
       async resolveAgent() { resolves++; return { agent: { session } } },
@@ -20,12 +20,12 @@ function fixture({ human = false, title, refresh } = {}) {
       async refresh() { writes++; if (refresh) await refresh(); return state = { title: '登录问题修复', source: { kind: 'provider' } } },
     },
     sessionQuery: {
-      async observeSession() { return { events, [Symbol.dispose]() { releases++ } } },
+      async observeSession() { throw new Error('Title input must use the existing aggregate') },
       async listSessions() { return [{ header: session.header }] },
       async readTitleSnapshots(ids) { return ids.map(sessionId => ({ status: 'fulfilled', sessionId, value: { session: session.header, title: state } })) },
     },
   }
-  return { ctx, session, get eventCount() { return events.length }, get releases() { return releases }, get writes() { return writes }, get resolves() { return resolves } }
+  return { ctx, session, get eventCount() { return events.length }, get writes() { return writes }, get resolves() { return resolves } }
 }
 
 test('空会话名称含工作区、创建时间和短身份，不发送用户消息', async () => {
@@ -34,7 +34,6 @@ test('空会话名称含工作区、创建时间和短身份，不发送用户�
   assert.equal(result.kind, 'empty')
   assert.equal(result.title, '空会话 PangHu 2026-10-02 18:50 ixture')
   assert.equal(f.eventCount, 0)
-  assert.equal(f.releases, 1)
   assert.equal('events' in f.session, false)
   assert.equal(emptySessionTitle(f.session.header, 'Asia/Hong_Kong'), result.title)
 })
@@ -60,13 +59,15 @@ test('同一会话并发重试复用写入，失败后可再次请求', async ()
   assert.equal(titles.pending.size, 0)
 })
 
-test('Host 读取全部身份和独立标题观察，旧占位名称仍可识别', async () => {
+test('列表读取已有投影候选，已附着会话使用最新标题，旧占位名称仍可识别', async () => {
   const f = fixture(), titles = new SessionTitles(f.ctx)
   const result = await titles.read({ action: 'list' })
   assert.equal(result.items[0].sessionId, f.session.id)
   assert.equal(result.items[0].unnamed, true)
   assert.equal(isUnnamedTitle(' 未命名 '), true)
   assert.equal(isUnnamedTitle('真实标题'), false)
+  f.ctx.sessionTitle.get = () => ({ title: '已经命名', source: { kind: 'user' } })
+  assert.equal((await titles.read({ action: 'list' })).items[0].unnamed, false)
 })
 
 test('不存在的会话及命名回读不一致拒绝请求', async () => {

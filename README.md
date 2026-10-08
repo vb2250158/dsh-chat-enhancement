@@ -8,6 +8,10 @@ This release requires DSH 0.2.1-alpha.1 or a compatible 0.2 release. See [compat
 
 The session menu provides Auto-rename using existing human messages. First-message naming remains enabled; empty sessions use their workspace, creation time and short identity. Titles persist through the Host title service without submitting prompts or starting turns. Batch callers set `onlyUnnamed: true` on `chatTitles/read`, preserving existing titles and reading accepted values back.
 
+批量列表返回现有投影中的候选；写入前仍通过当前标题服务保留已命名会话。空会话依据正式 `titleInput` 聚合判断，列名与命名判断不重复载入历史日志。
+
+Batch lists expose existing projection candidates; each write rechecks the current title owner. Empty-session detection uses the registered `titleInput` aggregate without an additional historical-log observation.
+
 ## 0.3.63：工作区文件夹吸顶
 
 工作区列表滚动时保留当前父级文件夹；嵌套文件夹按层级停在父级下方。保留原文件夹的折叠、新建、菜单和拖拽操作，背景使用当前主题的侧栏颜色。配套工作区补丁与安装步骤见 [工作区吸顶](docs/workspace-sticky-headers.md)。

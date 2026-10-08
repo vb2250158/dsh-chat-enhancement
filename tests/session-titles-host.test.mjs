@@ -11,10 +11,10 @@ test('正式 Host 注册标题服务，首消息替换空会话名称，卸载�
   const session = Session.create(SessionId('fixture-host-title'))
   const events = []
   let state = { title: emptySessionTitle(session.header), source: { kind: 'user' } }
-  for (const name of ['sessions', 'sessionTitle', 'sessionController', 'sessionQuery']) ctx.provide(name)
+  for (const name of ['sessions', 'sessionTitle', 'sessionController', 'sessionProjections']) ctx.provide(name)
   ctx.set('sessions', { get: () => session })
   ctx.set('sessionController', { async list() { return { items: [] } } })
-  ctx.set('sessionQuery', { async readTitleSnapshots() { return [] }, async observeSession() { return { events, [Symbol.dispose]() {} } } })
+  ctx.set('sessionProjections', { stateOf: () => ({ count: events.length }) })
   ctx.set('sessionTitle', { get: () => state, async refresh() { return state = { title: '修复登录', source: { kind: 'provider' } } } })
   const fork = ctx.plugin({ apply(scope) { installSessionTitles(scope, protocol) } })
   try {

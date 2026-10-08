@@ -524,7 +524,7 @@ export function apply(ctx, config = {}) {
   registerSettings(ctx, config)
   const mediaStore = new MediaStore(resolved.maxAudioBytes, resolved.maxVideoBytes)
   const protocol = profileProtocol()
-  ctx.inject(['sessionQuery', 'sessionController', 'sessions', 'sessionTitle'], scope => installSessionTitles(scope, protocol, config))
+  ctx.inject(['sessionProjections', 'sessionController', 'sessions', 'sessionTitle'], scope => installSessionTitles(scope, protocol, config))
   ctx.inject(['sessionQuery', 'sessionController', 'subagents', 'goals'], scope => installSessionRecovery(scope, protocol, config))
   const ChatMediaService = createMediaService(protocol, mediaStore)
   const ChatMarkdownService = createMarkdownService(protocol, ctx, resolved.maxMarkdownBytes)

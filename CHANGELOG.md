@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.66 (2026-10-08)
+
+- 使用标题服务已有的用户输入聚合判断空会话，列名读取现有投影候选；写前仍复核当前标题，避免批量列名重复载入旧日志。
+- Use the title owner's existing input aggregate and cached listing candidates, retaining the authoritative pre-write title check without cold-log batch reads.
+
 ## 0.3.65 (2026-10-08)
 
 - 会话命名通过正式异步观察读取用户消息，释放观察后调用标题生成；真实 Session 验证不依赖已移除的 `events` 属性。
