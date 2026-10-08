@@ -2,6 +2,13 @@
 
 This release requires DSH 0.2.1-alpha.1 or a compatible 0.2 release. See [compatibility details](docs/dsh-0.2-compatibility.md).
 
+## 0.3.63：工作区文件夹吸顶
+
+工作区列表滚动时保留当前父级文件夹；嵌套文件夹按层级停在父级下方。保留原文件夹的折叠、新建、菜单和拖拽操作，背景使用当前主题的侧栏颜色。配套工作区补丁与安装步骤见 [工作区吸顶](docs/workspace-sticky-headers.md)。
+
+Workspace headers remain visible while their sessions scroll. Nested headers stack below ancestors and retain the original controls. The companion patch and installation commands are documented in [Workspace sticky headers](docs/workspace-sticky-headers.md).
+
+
 ## 0.3.61：中断扫描加速
 
 中断检查默认同时读取 4 个会话；`recoveryScanConcurrency` 可在插件配置中设置为 1–16。只读扫描并行，原会话的恢复仍按既有顺序执行。进度显示最早尚未完成的读取及其等待时间，读取失败仍可单独重试。根会话的资格检查只遍历最后轮次，避免多次复制完整事件数组。

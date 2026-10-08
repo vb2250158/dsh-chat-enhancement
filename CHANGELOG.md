@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.63 (2026-10-08)
+
+- 增加工作区文件夹吸顶补丁，保留原文件夹操作，嵌套标题按层级排列。
+- Bundle the workspace sticky-header patch, retaining existing controls and stacking nested headers below ancestors.
+
+
 ## 0.3.61 (2026-10-08)
 
 - 中断检查默认 4 路限量并行，最后轮次反向读取，保留原恢复顺序、失败重试和取消释放。
