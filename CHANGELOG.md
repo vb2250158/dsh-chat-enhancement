@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.65 (2026-10-08)
+
+- 会话命名通过正式异步观察读取用户消息，释放观察后调用标题生成；真实 Session 验证不依赖已移除的 `events` 属性。
+- Read title input through asynchronous session observations, releasing the observation before generation; cover the current Session class without an `events` property.
+
 ## 0.3.64 (2026-10-08)
 
 - 恢复会话菜单自动重命名，提供写前复核及写后回读的批量调用入口；空会话使用可确认元数据命名。

@@ -52,7 +52,10 @@ export class SessionTitles {
     }
     const before = this.ctx.sessionTitle.get(session)
     if (request.onlyUnnamed && !isUnnamedTitle(before?.title)) return { sessionId: session.id, title: before.title, kind: 'retained' }
-    const human = session.events.some(event => event.type === 'user/message' && event.data.source.kind === 'user' && event.data.content.some(block => block.type === 'text' && block.text.trim()))
+    const observation = await this.ctx.sessionQuery.observeSession(session.id)
+    let human
+    try { human = observation.events.some(event => event.type === 'user/message' && event.data.source.kind === 'user' && event.data.content.some(block => block.type === 'text' && block.text.trim())) }
+    finally { observation[Symbol.dispose]() }
     let accepted
     if (!human) accepted = this.ctx.sessionTitle.rename(session, emptySessionTitle(session.header, this.timeZone))
     else {

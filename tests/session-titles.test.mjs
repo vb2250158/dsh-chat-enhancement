@@ -3,7 +3,9 @@ import test from 'node:test'
 import { emptySessionTitle, isUnnamedTitle, SessionTitles } from '../src/session-titles.js'
 
 function fixture({ human = false, title, refresh } = {}) {
-  const session = { id: 'session-fixture', header: { id: 'session-fixture', cwd: 'C:/Projects/PangHu', createdAt: Date.UTC(2026, 9, 2, 10, 50) }, events: human ? [{ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '修复登录' }] } }] : [] }
+  const session = { id: 'session-fixture', header: { id: 'session-fixture', cwd: 'C:/Projects/PangHu', createdAt: Date.UTC(2026, 9, 2, 10, 50) } }
+  const events = human ? [{ type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '修复登录' }] } }] : []
+  let releases = 0
   let state = title ? { title, source: { kind: 'user' } } : undefined
   let writes = 0, resolves = 0
   const ctx = {
@@ -18,11 +20,12 @@ function fixture({ human = false, title, refresh } = {}) {
       async refresh() { writes++; if (refresh) await refresh(); return state = { title: '登录问题修复', source: { kind: 'provider' } } },
     },
     sessionQuery: {
+      async observeSession() { return { events, [Symbol.dispose]() { releases++ } } },
       async listSessions() { return [{ header: session.header }] },
       async readTitleSnapshots(ids) { return ids.map(sessionId => ({ status: 'fulfilled', sessionId, value: { session: session.header, title: state } })) },
     },
   }
-  return { ctx, session, get writes() { return writes }, get resolves() { return resolves } }
+  return { ctx, session, get eventCount() { return events.length }, get releases() { return releases }, get writes() { return writes }, get resolves() { return resolves } }
 }
 
 test('空会话名称含工作区、创建时间和短身份，不发送用户消息', async () => {
@@ -30,7 +33,9 @@ test('空会话名称含工作区、创建时间和短身份，不发送用户�
   const result = await titles.read({ action: 'rename', sessionId: f.session.id, onlyUnnamed: true })
   assert.equal(result.kind, 'empty')
   assert.equal(result.title, '空会话 PangHu 2026-10-02 18:50 ixture')
-  assert.equal(f.session.events.length, 0)
+  assert.equal(f.eventCount, 0)
+  assert.equal(f.releases, 1)
+  assert.equal('events' in f.session, false)
   assert.equal(emptySessionTitle(f.session.header, 'Asia/Hong_Kong'), result.title)
 })
 
