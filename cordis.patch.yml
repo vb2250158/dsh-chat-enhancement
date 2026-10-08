@@ -1,8 +1,18 @@
 - id: attachment-local
   name: '@deepseek-ai/dsh-attachment-local'
   disabled: true
+- id: session-title-llm
+  name: dsh-chat-enhancement/session-title-provider
+  config:
+    targetWords: 5
+    targetCjkCharacters: 10
+    maxInputBytes: 32768
+    maxOutputTokens: 64
+    timeoutMs: 60000
 - insert:
     - id: chat-enhancement-attachments
       name: dsh-chat-enhancement/image-attachments
     - id: chat-enhancement
       name: dsh-chat-enhancement
+      config:
+        emptyTitleTimeZone: Asia/Hong_Kong

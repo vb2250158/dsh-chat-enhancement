@@ -2,6 +2,18 @@
 
 This release requires DSH 0.2.1-alpha.1 or a compatible 0.2 release. See [compatibility details](docs/dsh-0.2-compatibility.md).
 
+## 0.3.64：自动重命名
+
+会话菜单提供“自动重命名”，从已有用户消息重新生成标题；首条消息的自动命名仍保留。空会话使用工作区、创建时间和短身份命名。命名通过正式 Host 标题服务保存，不发送提示词或启动对话轮次。批量调用 `chatTitles/read` 时使用 `onlyUnnamed: true`，写前保留已有名称，并在写后回读标题。
+
+The session menu provides Auto-rename using existing human messages. First-message naming remains enabled; empty sessions use their workspace, creation time and short identity. Titles persist through the Host title service without submitting prompts or starting turns. Batch callers set `onlyUnnamed: true` on `chatTitles/read`, preserving existing titles and reading accepted values back.
+
+## 0.3.63：工作区文件夹吸顶
+
+工作区列表滚动时保留当前父级文件夹；嵌套文件夹按层级停在父级下方。保留原文件夹的折叠、新建、菜单和拖拽操作，背景使用当前主题的侧栏颜色。配套工作区补丁与安装步骤见 [工作区吸顶](docs/workspace-sticky-headers.md)。
+
+Workspace headers remain visible while their sessions scroll. Nested headers stack below ancestors and retain the original controls. The companion patch and installation commands are documented in [Workspace sticky headers](docs/workspace-sticky-headers.md).
+
 ## 0.3.61：中断扫描加速
 
 中断检查默认同时读取 4 个会话；`recoveryScanConcurrency` 可在插件配置中设置为 1–16。只读扫描并行，原会话的恢复仍按既有顺序执行。进度显示最早尚未完成的读取及其等待时间，读取失败仍可单独重试。根会话的资格检查只遍历最后轮次，避免多次复制完整事件数组。

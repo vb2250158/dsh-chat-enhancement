@@ -1,6 +1,7 @@
 /** Browser entry for the chat-enhancement DSH bundle. */
 
 import * as React from 'react'
+import { titleDescriptor, installSessionTitlesClient } from './session-titles-client.js'
 import { installCodeReferences } from './code-references-client.js'
 import { QuestionRichContent, questionContentLocales, questionContentCss } from './question-content.js'
 import { recoveryDescriptor, recoveryLocales, recoveryCss, SessionRecoveryPrompt } from './session-recovery-client.js'
@@ -895,6 +896,7 @@ const markdownResultSchema = { parse(value) {
   return value
 } }
 const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
+  titleDescriptor,
   recoveryDescriptor,
   {
     id: 'dsh-chat-enhancement#chatMedia/read', service: 'chatMedia', namespace: 'chatMedia', method: 'read', invocation: { kind: 'direct' },
@@ -925,6 +927,7 @@ export async function apply(ctx) {
     return () => style.remove()
   })
   const dispose = await ctx.remote.$mount(previewRemote)
+  installSessionTitlesClient(ctx)
   installGoalMetricsClient(ctx)
   const recoveryService = ctx.reflect.get('remote.chatRecovery')
   const readRecovery = async request => {

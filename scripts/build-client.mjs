@@ -7,6 +7,7 @@ const strip = source => source
 // catalog: stripping the imports leaves one top-level `const`, which every
 // later module must be able to read at evaluation time.
 const languages = strip(await readFile(new URL('src/languages.js', root), 'utf8'))
+const sessionTitles = strip(await readFile(new URL('src/session-titles-client.js', root), 'utf8'))
 const annotations = strip(await readFile(new URL('src/annotations.js', root), 'utf8'))
 const backgroundJobs = strip(await readFile(new URL('src/background-jobs.js', root), 'utf8'))
 const recoveryClient = strip(await readFile(new URL('src/session-recovery-client.js', root), 'utf8'))
@@ -20,8 +21,9 @@ await writeFile(new URL('lib/client.js', root), `window.__ModuleLoader__.load({
   factory: (require) => {
     const React = require('react')
     const { GoalBar, GoalEditDialog, GoalEditDialogController } = require('@deepseek-ai/dsh-client-ui-goal')
-    const { CodeBlock, MarkdownText, Modal, Button, Menu, IconChevronDownOutlineRegular, StateDot, Tooltip, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { CodeBlock, MarkdownText, Modal, Button, Menu, MenuItemButton, IconSparkleRegular, IconChevronDownOutlineRegular, StateDot, Tooltip, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
 ${languages}
+${sessionTitles}
 ${annotations}
 ${backgroundJobs}
 ${recoveryClient}

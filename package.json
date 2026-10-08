@@ -1,6 +1,6 @@
 {
   "name": "dsh-chat-enhancement",
-  "version": "0.3.61",
+  "version": "0.3.64",
   "description": "Inline previews for DSH chat tool results",
   "type": "module",
   "main": "lib/index.js",
@@ -13,7 +13,8 @@
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
     "./image-attachments/locale/*.json": "./locale/image-attachments/*.json",
-    "./image-attachments/icon": "./image-attachments.svg"
+    "./image-attachments/icon": "./image-attachments.svg",
+    "./session-title-provider": "./src/session-title-provider.js"
   },
   "dsh": {
     "client": {
@@ -30,7 +31,8 @@
         "@deepseek-ai/dsh-api-session-controller",
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-session",
-        "@deepseek-ai/dsh-client-ui-plugin-manager"
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-workspace"
       ],
       "platform": "web"
     },
@@ -52,7 +54,9 @@
     "@deepseek-ai/dsh-api-session-controller": ">=0.2.1-alpha.1 <0.3.0",
     "@deepseek-ai/dsh-client-ui-renderer": ">=0.2.1-alpha.1 <0.3.0",
     "@deepseek-ai/dsh-client-ui-session": ">=0.2.1-alpha.1 <0.3.0",
-    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.2.1-alpha.1 <0.3.0"
+    "@deepseek-ai/dsh-client-ui-plugin-manager": ">=0.2.1-alpha.1 <0.3.0",
+    "@deepseek-ai/dsh-session-title-llm": ">=0.2.1-alpha.1 <0.3.0",
+    "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.1-alpha.1 <0.3.0"
   },
   "files": [
     "scripts/recover-sessions.mjs",
@@ -82,7 +86,10 @@
     "locale",
     "icon.svg",
     "ICON_LICENSE.txt",
-    "image-attachments.svg"
+    "image-attachments.svg",
+    "src/session-titles.js",
+    "src/session-titles-client.js",
+    "src/session-title-provider.js"
   ],
   "scripts": {
     "build:client": "node scripts/build-client.mjs",

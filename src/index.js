@@ -6,6 +6,7 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { createGoalMetricsProjection } from './goal-metrics.js'
+import { installSessionTitles } from './session-titles.js'
 import {
   AUTO_LANGUAGE,
   DEFAULT_ANCHOR_MODE,
@@ -523,6 +524,7 @@ export function apply(ctx, config = {}) {
   registerSettings(ctx, config)
   const mediaStore = new MediaStore(resolved.maxAudioBytes, resolved.maxVideoBytes)
   const protocol = profileProtocol()
+  ctx.inject(['sessionQuery', 'sessionController', 'sessions', 'sessionTitle'], scope => installSessionTitles(scope, protocol, config))
   ctx.inject(['sessionQuery', 'sessionController', 'subagents', 'goals'], scope => installSessionRecovery(scope, protocol, config))
   const ChatMediaService = createMediaService(protocol, mediaStore)
   const ChatMarkdownService = createMarkdownService(protocol, ctx, resolved.maxMarkdownBytes)
@@ -556,6 +558,7 @@ const CHAT_SETTINGS_FIELDS = {
 
 /** Live preferences and ordinary deployment tool/recovery limits. */
 export const Config = z.object({
+  emptyTitleTimeZone: z.string().default('UTC'),
   ...CHAT_SETTINGS_FIELDS,
   maxAudioBytes: z.number().min(1).step(1).default(DEFAULT_MAX_AUDIO_BYTES),
   maxVideoBytes: z.number().min(1).step(1).default(DEFAULT_MAX_VIDEO_BYTES),
