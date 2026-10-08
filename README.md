@@ -2,6 +2,16 @@
 
 This release requires DSH 0.2.1-alpha.1 or a compatible 0.2 release. See [compatibility details](docs/dsh-0.2-compatibility.md).
 
+## 0.3.61：中断扫描加速
+
+中断检查默认同时读取 4 个会话；`recoveryScanConcurrency` 可在插件配置中设置为 1–16。只读扫描并行，原会话的恢复仍按既有顺序执行。进度显示最早尚未完成的读取及其等待时间，读取失败仍可单独重试。根会话的资格检查只遍历最后轮次，避免多次复制完整事件数组。
+
+Interruption checks read four sessions concurrently by default. Set `recoveryScanConcurrency` to 1–16 in plugin configuration. Resumption retains the original ordering; progress identifies the oldest pending read, and failed reads remain individually retryable. Root-session eligibility visits only the final turn without copying complete event arrays.
+
+现有 Host 的完整历史缓存默认只保留 5 个会话。本次保持缓存容量，限制同时读取的历史数量。跨重启的恢复摘要需要与当前日志核对版本，旧投影缓存可能落后于日志，不能直接据此跳过检查。
+
+The current Host caches five complete cold sessions by default. This release keeps that capacity and bounds concurrent history reads. A recovery summary reused across restarts must establish freshness against the current log; a stale projection checkpoint cannot safely exclude a session from scanning.
+
 ## 0.3.55：Markdown 弹窗流程图与大视图
 
 文件引用中的 Markdown 弹窗优先使用 Markdown 增强插件的完整渲染器，流程图可切换图形与源码并缩放；未安装 Markdown 增强时保留通用 Markdown 预览。弹窗默认占据接近整个窗口，文档内容独立滚动。配套 Markdown 增强 0.1.7。

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.61 (2026-10-08)
+
+- 中断检查默认 4 路限量并行，最后轮次反向读取，保留原恢复顺序、失败重试和取消释放。
+- Bound interruption scans to four concurrent reads and inspect final turns backwards, preserving resumption order, retries and cancellation cleanup.
+
 ## 0.3.60 (2026-10-07)
 
 - 缩小图标绘制内容约三分之一，增加方框内的留白。

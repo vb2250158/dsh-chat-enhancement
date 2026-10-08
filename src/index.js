@@ -564,4 +564,5 @@ export const Config = z.object({
   recoveryLookbackMs: z.number().min(1).step(1).default(3600000),
   recoveryPollIntervalMs: z.number().min(1).step(1).default(1500),
   recoveryReadTimeoutMs: z.number().min(1).step(1).default(30000),
+  recoveryScanConcurrency: z.number().min(1).max(16).step(1).default(4),
 })

@@ -4,11 +4,12 @@ import { setImmediate as yieldToHost } from 'node:timers/promises'
 
 /** 解析可由 cordis.yml 调整的检查范围、轮询间隔和读取超时。 */
 export function recoveryConfig(config = {}) {
-  const values = { recoveryLookbackMs: 3600000, recoveryPollIntervalMs: 1500, recoveryReadTimeoutMs: 30000 }
+  const values = { recoveryLookbackMs: 3600000, recoveryPollIntervalMs: 1500, recoveryReadTimeoutMs: 30000, recoveryScanConcurrency: 4 }
   for (const key of Object.keys(values)) {
     if (config[key] !== undefined) values[key] = config[key]
     if (!Number.isSafeInteger(values[key]) || values[key] <= 0) throw new TypeError(`${key} must be a positive integer`)
   }
+  if (values.recoveryScanConcurrency > 16) throw new TypeError('recoveryScanConcurrency must be at most 16')
   values.recoveryAutoResume = config.recoveryAutoResume ?? true
   if (typeof values.recoveryAutoResume !== 'boolean') throw new TypeError('recoveryAutoResume must be boolean')
   return values
@@ -16,18 +17,28 @@ export function recoveryConfig(config = {}) {
 
 /** 只识别本会话最后一轮的崩溃记录；继承历史和主动取消不属于候选。 */
 export function interruptedCandidate(observation, bootAt, lookbackMs) {
-  const events = observation.events.filter(event => event.seq >= observation.inheritedEventCount)
-  const start = events.findLast(event => event.type === 'turn/start')
+  const events = observation.events
+  let start, end, mode, userAfterEnd = false, lastTime = -Infinity, index = events.length - 1
+  for (; index >= 0 && events[index].seq >= observation.inheritedEventCount; index--) {
+    const event = events[index]
+    if (event.type === 'subagent/descriptor' && mode === undefined) mode = event.data.mode
+    if (event.type === 'turn/start') { start = event; break }
+    if (event.type === 'user/message' && !end) userAfterEnd = true
+    if (event.type === 'turn/end' && !end) end = event
+    if (!event.type.startsWith('session/')) lastTime = Math.max(lastTime, event.time)
+  }
   if (!start) return undefined
-  const tail = events.filter(event => event.seq > start.seq)
-  const end = tail.findLast(event => event.type === 'turn/end')
   if (end && end.data.reason.kind !== 'interrupted') return undefined
-  if (tail.some(event => event.type === 'user/message' && end && event.seq > end.seq)) return undefined
+  if (end && userAfterEnd) return undefined
   // 冷会话挂载会追加 session/end-seed；它不改变被中断轮次的发生时间。
-  const lastTime = end?.time ?? tail.filter(event => !event.type.startsWith('session/')).reduce((time, event) => Math.max(time, event.time), start.time)
+  lastTime = end?.time ?? Math.max(lastTime, start.time)
   if (lastTime < bootAt - lookbackMs || lastTime >= bootAt) return undefined
-  const mode = events.findLast(event => event.type === 'subagent/descriptor')?.data.mode
-  if (observation.header.origin === 'subagent' && mode !== 'continuable') return undefined
+  if (observation.header.origin === 'subagent') {
+    for (index--; mode === undefined && index >= 0 && events[index].seq >= observation.inheritedEventCount; index--) {
+      if (events[index].type === 'subagent/descriptor') mode = events[index].data.mode
+    }
+    if (mode !== 'continuable') return undefined
+  }
   return { id: observation.header.id, startSeq: start.seq, parentId: observation.header.origin === 'subagent' ? observation.header.parentSession : undefined }
 }
 
@@ -173,22 +184,44 @@ export class SessionRecovery {
     const selected = retryOnly ? records.filter(record => retryIds.has(record.header.id)) : records
     this.total = selected.length
     this.headers = new Map(records.map(record => [record.header.id, record.header]))
-    for (const { header } of selected) {
-      this.abort.signal.throwIfAborted()
-      this.setStage('scanning', header.id)
-      if (this.busy(header.id)) { this.completed += 1; continue }
-      try {
-        const candidate = await this.observe(header.id, value => interruptedCandidate(value, this.bootAt, this.config.recoveryLookbackMs))
-        if (candidate && !this.candidates.has(candidate.id)) this.candidates.set(candidate.id, candidate)
-      } catch (error) {
-        // 单个会话损坏或读取超时保留失败计数，允许用户重试本批检查。
-        this.abort.signal.throwIfAborted()
-        this.scanErrors += 1
-        this.issues.set(header.id, { sessionId: header.id, stage: 'check', message: String(error.message ?? error).split('\n')[0].slice(0, 300) })
-      }
-      this.completed += 1
-      await yieldToHost(undefined, { signal: this.abort.signal })
+    this.setStage('scanning')
+    const reading = new Map()
+    const showOldestRead = () => {
+      const oldest = reading.entries().next().value
+      this.currentSessionId = oldest?.[0] ?? ''
+      this.stageStartedAt = oldest?.[1] ?? Date.now()
     }
+    let next = 0
+    const worker = async () => {
+      while (next < selected.length) {
+        const { header } = selected[next++]
+        this.abort.signal.throwIfAborted()
+        if (this.busy(header.id)) { this.completed += 1; continue }
+        reading.set(header.id, Date.now())
+        showOldestRead()
+        try {
+          const candidate = await this.observe(header.id, value => interruptedCandidate(value, this.bootAt, this.config.recoveryLookbackMs))
+          if (candidate && !this.candidates.has(candidate.id)) this.candidates.set(candidate.id, candidate)
+        } catch (error) {
+          // 单个会话损坏或读取超时保留失败计数，允许用户重试本批检查。
+          this.abort.signal.throwIfAborted()
+          this.scanErrors += 1
+          this.issues.set(header.id, { sessionId: header.id, stage: 'check', message: String(error.message ?? error).split('\n')[0].slice(0, 300) })
+        } finally {
+          reading.delete(header.id)
+          showOldestRead()
+        }
+        this.completed += 1
+        await yieldToHost(undefined, { signal: this.abort.signal })
+      }
+    }
+    const workers = await Promise.allSettled(Array.from({ length: Math.min(selected.length, this.config.recoveryScanConcurrency) }, worker))
+    const failed = workers.find(result => result.status === 'rejected')
+    if (failed) throw failed.reason
+    // 并行读取的完成顺序不改变主子会话的原有恢复顺序。
+    const ordered = new Map(records.flatMap(({ header }) => this.candidates.has(header.id) ? [[header.id, this.candidates.get(header.id)]] : []))
+    for (const [id, candidate] of this.candidates) if (!ordered.has(id)) ordered.set(id, candidate)
+    this.candidates = ordered
     if (this.phase !== 'recovering') this.phase = this.scanErrors ? 'failed' : this.candidates.size ? 'ready' : 'done'
   }
 
