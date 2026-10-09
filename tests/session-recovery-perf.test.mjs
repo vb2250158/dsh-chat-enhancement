@@ -15,7 +15,7 @@ test('扫描限量并行，进度对应最早未完成读取，候选保持列�
   const headers = Array.from({ length: 7 }, (_, i) => ({ id: String(i) }))
   let changed
   const started = () => new Promise(resolve => { changed = resolve })
-  const ctx = { agents: { get() {} }, sessionQuery: {
+  const ctx = { get() {}, agents: { get() {} }, sessionQuery: {
     async listSessions() { return headers.map(header => ({ header })) },
     observeSession(id) {
       reads.push(id)
@@ -54,7 +54,7 @@ test('取消扫描收束全部工作者，迟到句柄释放且不再取新记�
   const releases = [], disposed = []
   let started
   const allStarted = new Promise(resolve => { started = resolve })
-  const ctx = { agents: { get() {} }, sessionQuery: {
+  const ctx = { get() {}, agents: { get() {} }, sessionQuery: {
     async listSessions() { return Array.from({ length: 8 }, (_, id) => ({ header: { id: String(id) } })) },
     observeSession(id) { return new Promise(resolve => {
       releases.push(() => { const observation = value(id); observation[Symbol.dispose] = () => disposed.push(id); resolve(observation) })

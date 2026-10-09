@@ -1,0 +1,33 @@
+diff --git a/packages/session/session-persistence/src/index.ts b/packages/session/session-persistence/src/index.ts
+index 80b344c4e9..a35da0fd46 100644
+--- a/packages/session/session-persistence/src/index.ts
++++ b/packages/session/session-persistence/src/index.ts
+@@ -56,6 +56,8 @@ export interface SessionPersistenceSnapshot {
+   readonly eventCount?: number
+   /** Physical artifact byte size, when the backend can provide it cheaply (JSONL); otherwise absent. */
+   readonly sizeBytes?: number
++  /** Physical artifact modification time in Unix epoch milliseconds, when cheaply available; absent for unmaterialized sessions. This is not an event timestamp or a freshness token. */
++  readonly modifiedAt?: number
+ }
+ 
+ /** Options for {@link SessionPersistence.create}. */
+diff --git a/packages/session/session-persistence-jsonl/src/index.ts b/packages/session/session-persistence-jsonl/src/index.ts
+index d7ed40bd13..7d36e4a147 100644
+--- a/packages/session/session-persistence-jsonl/src/index.ts
++++ b/packages/session/session-persistence-jsonl/src/index.ts
+@@ -467,6 +467,7 @@ class JsonlSessionPersistence extends SessionPersistence {
+           ? SessionPersistenceRevision(`${fileRevision(identity)}:${await this.historicalCorpusRevision(options?.signal)}`)
+           : fileRevision(identity),
+         sizeBytes: Number(identity.size),
++        modifiedAt: Number(identity.mtimeMs),
+       }
+     } catch (error: unknown) {
+       options?.signal?.throwIfAborted()
+@@ -505,6 +506,7 @@ class JsonlSessionPersistence extends SessionPersistence {
+             ? SessionPersistenceRevision(`${fileRevision(identity)}:${corpusRevision}`)
+             : fileRevision(identity),
+           sizeBytes: Number(identity.size),
++          modifiedAt: Number(identity.mtimeMs),
+         }
+       } catch (error: unknown) {
+         signal?.throwIfAborted()

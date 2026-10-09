@@ -4,7 +4,7 @@ import { setImmediate as yieldToHost } from 'node:timers/promises'
 
 /** 解析可由 cordis.yml 调整的检查范围、轮询间隔和读取超时。 */
 export function recoveryConfig(config = {}) {
-  const values = { recoveryLookbackMs: 3600000, recoveryPollIntervalMs: 1500, recoveryReadTimeoutMs: 30000, recoveryScanConcurrency: 4 }
+  const values = { recoveryLookbackMs: 86400000, recoveryPollIntervalMs: 1500, recoveryReadTimeoutMs: 30000, recoveryScanConcurrency: 4 }
   for (const key of Object.keys(values)) {
     if (config[key] !== undefined) values[key] = config[key]
     if (!Number.isSafeInteger(values[key]) || values[key] <= 0) throw new TypeError(`${key} must be a positive integer`)
@@ -181,7 +181,20 @@ export class SessionRecovery {
     this.total = 0
     this.setStage('listing')
     const records = await this.waitFor('list', () => this.ctx.sessionQuery.listSessions(this.abort.signal))
-    const selected = retryOnly ? records.filter(record => retryIds.has(record.header.id)) : records
+    const persistence = this.ctx.get('sessionPersistence')
+    const stored = persistence ? await this.waitFor('metadata', () => persistence.list({ signal: this.abort.signal })) : []
+    const modified = new Map(stored.map(snapshot => [snapshot.header.id, snapshot.modifiedAt]))
+    const cutoff = this.bootAt - this.config.recoveryLookbackMs
+    const selected = records.filter(({ header }) => {
+      if (retryOnly && !retryIds.has(header.id)) return false
+      if (this.busy(header.id)) return false
+      const live = this.ctx.get('sessions')?.get(header.id)
+      const latest = live?.snapshotEvents().at(-1)?.time
+      const modifiedAt = modified.get(header.id)
+      // 无时间元数据的后端保留检查；创建时间不能排除最近续用的旧会话。
+      if (modifiedAt === undefined && latest === undefined) return true
+      return Math.max(header.createdAt, modifiedAt ?? -Infinity, latest ?? -Infinity) >= cutoff
+    })
     this.total = selected.length
     this.headers = new Map(records.map(record => [record.header.id, record.header]))
     this.setStage('scanning')

@@ -30,9 +30,13 @@ Workspace headers remain visible while their sessions scroll. Nested headers sta
 
 ## 0.3.61：中断扫描加速
 
-中断检查默认同时读取 4 个会话；`recoveryScanConcurrency` 可在插件配置中设置为 1–16。只读扫描并行，原会话的恢复仍按既有顺序执行。进度显示最早尚未完成的读取及其等待时间，读取失败仍可单独重试。根会话的资格检查只遍历最后轮次，避免多次复制完整事件数组。
+中断检查默认只读取启动前 24 小时内活动过的会话日志，同时读取 4 个会话；`recoveryLookbackMs` 可调整时间窗口，`recoveryScanConcurrency` 可设置为 1–16。旧会话按文件修改时间或实时活动筛选，不按创建时间排除。目录仍保留全部 header，供子会话恢复原父 Agent。原会话恢复保持既有顺序，失败项可单独重试。
 
-Interruption checks read four sessions concurrently by default. Set `recoveryScanConcurrency` to 1–16 in plugin configuration. Resumption retains the original ordering; progress identifies the oldest pending read, and failed reads remain individually retryable. Root-session eligibility visits only the final turn without copying complete event arrays.
+Interruption checks read logs active within the 24 hours before startup, with four concurrent reads by default. Configure the window through `recoveryLookbackMs` and concurrency through `recoveryScanConcurrency` (1–16). Artifact modification times and live activity retain recently reused older sessions; all headers remain available for parent recovery. Resumption keeps the existing order and failed reads remain individually retryable.
+
+先应用配套补丁 `patches/2026-10-09-recovery-scan-window.patch`，再重建 JSONL 持久化包并重启 Host。补丁为公开的 `stat()` / `list()` 快照增加可选文件修改时间 `modifiedAt`，无需读取日志正文。没有时间元数据的第三方后端继续检查未知记录，避免遗漏最近续用的旧会话。
+
+Apply `patches/2026-10-09-recovery-scan-window.patch`, rebuild the JSONL persistence package, and restart the Host. The patch adds optional artifact modification timestamps to public `stat()` / `list()` snapshots without reading event bodies. Backends lacking time metadata continue checking unknown records so recently reused sessions are retained.
 
 现有 Host 的完整历史缓存默认只保留 5 个会话。本次保持缓存容量，限制同时读取的历史数量。跨重启的恢复摘要需要与当前日志核对版本，旧投影缓存可能落后于日志，不能直接据此跳过检查。
 
@@ -122,7 +126,7 @@ A 2px line below the recovery prompt tracks accepted session resumptions. It ani
 
 进入网页后异步检查 DSH 启动前一小时内意外中断的会话，在会话列表底部显示一行「是否恢复意外中断会话 ✓ ×」。勾选向原会话提交续作，叉号忽略当前 Host 插件实例的提示；多标签页共享批次。检查不阻塞页面，恢复前重读记录并检查运行状态及输入队列，避免重复续作。
 
-已完成、主动取消、一次性子会话不进入候选。可续作子会话保留原父身份，已完成的普通父会话只挂载 Agent；无法挂载的父会话和部分失败保留重试入口。恢复回执表示已接收，不是任务业务完成。默认查启动前一小时，可在插件 config 设置 recoveryLookbackMs（3600000）、recoveryPollIntervalMs（1500）、recoveryReadTimeoutMs（30000），均为正整数毫秒。
+已完成、主动取消、一次性子会话不进入候选。可续作子会话保留原父身份，已完成的普通父会话只挂载 Agent；无法挂载的父会话和部分失败保留重试入口。恢复回执表示已接收，不是任务业务完成。默认查启动前 24 小时，可在插件 config 设置 recoveryLookbackMs（86400000）、recoveryPollIntervalMs（1500）、recoveryReadTimeoutMs（30000），均为正整数毫秒。
 
 运维 CLI 复用同一检查和恢复接口：
 
@@ -164,7 +168,7 @@ check 等待检查结束，recover 自动确认一次并等待批次结束；默
 
 - DSH 启动后自动检查启动前一小时内意外中断的会话，并在原会话直接续跑，不投递恢复消息。检查不阻塞页面；多标签页共享同一批次，失败项保留重试入口。关闭 `recoveryAutoResume` 后可手动检查和恢复。
 - 已完成、主动取消、正在运行及一次性子会话不会重复恢复。可续作子会话通过原父会话地址恢复；无法挂载的父会话、读取失败和部分恢复失败保留重试入口。恢复成功指请求已接收，不代表原任务已完成。窄侧栏隐藏该行，展开后显示。
-- 在 `chat-enhancement` 插件的 `config` 中可调整 `recoveryLookbackMs`（默认 `3600000`）、`recoveryPollIntervalMs`（默认 `1500`）和 `recoveryReadTimeoutMs`（默认 `30000`），均为正整数毫秒。检查按会话逐一异步读取日志；不会改写历史记录。此功能包含 Host 服务，安装后须重启 DSH 并刷新网页。
+- 在 `chat-enhancement` 插件的 `config` 中可调整 `recoveryLookbackMs`（默认 `86400000`）、`recoveryPollIntervalMs`（默认 `1500`）和 `recoveryReadTimeoutMs`（默认 `30000`），均为正整数毫秒。检查先筛选时间窗口，再限量并行读取会话日志；不会改写历史记录。此功能包含 Host 服务，安装后须重启 DSH 并刷新网页。
 
 - 对话增强设置中的四个勾选框改用官方主题化 `Switch`，保留设置值、禁用状态和可访问名称。
 

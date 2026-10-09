@@ -564,7 +564,7 @@ export const Config = z.object({
   maxVideoBytes: z.number().min(1).step(1).default(DEFAULT_MAX_VIDEO_BYTES),
   maxMarkdownBytes: z.number().min(1).step(1).default(DEFAULT_MAX_MARKDOWN_BYTES),
   recoveryAutoResume: z.boolean().default(true),
-  recoveryLookbackMs: z.number().min(1).step(1).default(3600000),
+  recoveryLookbackMs: z.number().min(1).step(1).default(86400000),
   recoveryPollIntervalMs: z.number().min(1).step(1).default(1500),
   recoveryReadTimeoutMs: z.number().min(1).step(1).default(30000),
   recoveryScanConcurrency: z.number().min(1).max(16).step(1).default(4),

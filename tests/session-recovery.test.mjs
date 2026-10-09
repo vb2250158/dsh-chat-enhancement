@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { SessionRecovery, interruptedCandidate, recoveryConfig, resumeInterruptedGoal } from '../src/session-recovery.js'
 
-const bootAt = 10000000
+const bootAt = 200000000
 function observation(id, { reason = 'interrupted', parentId, time = bootAt - 1000, inheritedEventCount = 0 } = {}) {
   const events = [{ type: 'turn/start', seq: 0, time: time - 100, data: { turn: 1 } }]
   if (parentId) events.push({ type: 'subagent/descriptor', seq: 1, time, data: { mode: 'continuable' } })
   if (reason) events.push({ type: 'turn/end', seq: events.length, time, data: { turn: 1, reason: { kind: reason } } })
-  return { header: { id, ...(parentId ? { origin: 'subagent', parentSession: parentId } : {}) }, events, inheritedEventCount, [Symbol.dispose]() {} }
+  return { header: { id, createdAt: time - 1000, ...(parentId ? { origin: 'subagent', parentSession: parentId } : {}) }, events, inheritedEventCount, [Symbol.dispose]() {} }
 }
 function fixture(items = [observation('root')]) {
   const values = new Map(items.map(value => [value.header.id, value]))
@@ -16,6 +16,10 @@ function fixture(items = [observation('root')]) {
   let reads = 0
   let fail = false
   const ctx = {
+    get(name) {
+      if (name === 'sessionPersistence') return { async list() { return [...values.values()].map(value => ({ header: value.header, modifiedAt: value.events.at(-1)?.time })) } }
+      return undefined
+    },
     agents: { get: id => agents.get(id) },
     sessionQuery: {
       async listSessions() { return [...values.values()].map(value => ({ header: value.header })) },
@@ -38,6 +42,53 @@ test('候选只含重启前一小时的最后中断轮，排除手动取消、�
   const child = observation('c', { parentId: 'p' }); child.events[1].data.mode = 'one-shot'
   assert.equal(interruptedCandidate(child, bootAt, 3600000), undefined)
   assert.throws(() => recoveryConfig({ recoveryLookbackMs: 0 }))
+})
+
+test('默认只读最近 24 小时的日志，保留最近续用的旧会话和截止边界', async () => {
+  assert.equal(recoveryConfig().recoveryLookbackMs, 86400000)
+  const old = observation('old', { time: bootAt - 86400001 })
+  const resumed = observation('old-recent', { time: bootAt - 18 * 3600000 })
+  resumed.header.createdAt = 0
+  const boundary = observation('boundary', { time: bootAt - 86400000 })
+  const f = fixture([old, resumed, boundary])
+  const readIds = []
+  const original = f.ctx.sessionQuery.observeSession
+  f.ctx.sessionQuery.observeSession = id => { readIds.push(id); return original(id) }
+  f.recovery.read({ action: 'check' }); await f.recovery.work
+  assert.deepEqual(readIds, ['old-recent', 'boundary'])
+  assert.equal(f.recovery.snapshot().total, 2)
+  assert.equal(f.recovery.snapshot().count, 2)
+  assert.ok(f.recovery.headers.has('old'))
+  await f.recovery.dispose()
+})
+
+test('扫描窗口遵守配置，未知修改时间不按创建时间误排除；运行中会话不计入扫描', async () => {
+  const f = fixture([observation('recent'), observation('older', { time: bootAt - 7200000 }), observation('running')])
+  f.recovery.config.recoveryLookbackMs = 3600000
+  f.agents.set('running', { status: 'running' })
+  f.recovery.read({ action: 'check' }); await f.recovery.work
+  assert.equal(f.reads(), 1)
+  assert.equal(f.recovery.snapshot().total, 1)
+  const unknown = fixture([observation('recent-old')])
+  unknown.values.get('recent-old').header.createdAt = 0
+  unknown.ctx.get = () => undefined
+  unknown.recovery.read({ action: 'check' }); await unknown.recovery.work
+  assert.equal(unknown.reads(), 1)
+  assert.equal(unknown.recovery.snapshot().count, 1)
+  await f.recovery.dispose(); await unknown.recovery.dispose()
+})
+
+test('尚未落盘的实时活动保留旧会话，磁盘修改时间较旧时仍检查', async () => {
+  const recent = observation('live-recent')
+  recent.header.createdAt = 0
+  const f = fixture([recent])
+  f.ctx.get = name => name === 'sessionPersistence'
+    ? { async list() { return [{ header: recent.header, modifiedAt: bootAt - 86400001 }] } }
+    : name === 'sessions' ? { get() { return { snapshotEvents: () => recent.events } } } : undefined
+  f.recovery.read({ action: 'check' }); await f.recovery.work
+  assert.equal(f.reads(), 1)
+  assert.equal(f.recovery.snapshot().count, 1)
+  await f.recovery.dispose()
 })
 test('首次查询立即返回且共享一次检查；叉号跨后续查询有效，无自动恢复', async () => {
   const f = fixture()
