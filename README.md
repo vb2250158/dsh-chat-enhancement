@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.68：聊天列表分批加载
+
+配套源码补丁先显示各工作区最近会话，旧会话随后按活动时间分批补齐；JSONL 目录扫描使用限量并行与 header 缓存。加载期间可打开已显示的会话，实时更新和删除不会被后续页覆盖。应用、重建和验收步骤见 [聊天列表加载](docs/session-list-loading.md)。
+
+The companion source patch displays recent workspace Sessions before older pages arrive, with bounded JSONL reads and revision-validated header caching. Received rows remain interactive and later pages preserve concurrent updates and removals. See [Session-list loading](docs/session-list-loading.md) for application, rebuild and validation.
+
 ## 0.3.67：Desktop 提问图片
 
 提问图文中的绝对本地路径通过 Web 或 Desktop 自身的 `/api/file` 路由读取。Desktop 仅接受 `dsh-app://app`，不使用原始 Host 地址或复制认证信息。问题选择、提交及图片失败回退保持一致。

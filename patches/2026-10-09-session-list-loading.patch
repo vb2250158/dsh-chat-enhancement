@@ -1,0 +1,1201 @@
+diff --git a/apps/web/tests/expected/session-list-pages/first-page.expected.md b/apps/web/tests/expected/session-list-pages/first-page.expected.md
+new file mode 100644
+index 0000000000..d593907ffc
+--- /dev/null
++++ b/apps/web/tests/expected/session-list-pages/first-page.expected.md
+@@ -0,0 +1,8 @@
++- tree "Sessions":
++  - treeitem "{{workspace}}" [expanded]
++  - treeitem "New Session" [selected]
++  - treeitem "Paged conversation 0 {{age}}"
++  - treeitem "Paged conversation 1 {{age}}"
++  - treeitem "Paged conversation 2 {{age}}"
++  - treeitem "Paged conversation 3 {{age}}"
++  - treeitem "Paged conversation 4 {{age}}"
+diff --git a/apps/web/tests/scaffold.ts b/apps/web/tests/scaffold.ts
+index 11d1467043..26682556bc 100644
+--- a/apps/web/tests/scaffold.ts
++++ b/apps/web/tests/scaffold.ts
+@@ -1540,7 +1540,7 @@ const ARIA_AGE =
+ function normalizeAria(snapshot: string, workspaceCwd: string, age: boolean): string {
+   // The session heading renders the workspace's basename, not the full
+   // path, so both spellings must collapse to the token.
+-  const base = workspaceCwd.split('/').pop()!
++  const base = basename(workspaceCwd)
+   return (age ? snapshot.replace(ARIA_AGE, '{{age}}') : snapshot)
+     .split(workspaceCwd).join('{{cwd}}')
+     .split(base).join('{{workspace}}')
+diff --git a/apps/web/tests/session-list-pages.e2e.ts b/apps/web/tests/session-list-pages.e2e.ts
+new file mode 100644
+index 0000000000..5e217b72b8
+--- /dev/null
++++ b/apps/web/tests/session-list-pages.e2e.ts
+@@ -0,0 +1,86 @@
++/** Progressive Session-list arrival through the shipped Web composition. */
++import { mkdir, readFile } from 'node:fs/promises'
++import { fileURLToPath } from 'node:url'
++import { join } from 'node:path'
++import { chromium, type Browser, type Page } from 'playwright'
++import type {} from '@deepseek-ai/dsh-api-session-controller'
++import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
++import { captureStableAria, compareOrRefreshGolden, launchWebScaffold, seedSession, webSnapshotMode, type WebScaffold } from './scaffold.ts'
++import { newEnglishPage } from './support.ts'
++
++const SEED = fileURLToPath(new URL('../../../snapshots/web/seeded-history/session.v3.jsonl', import.meta.url))
++const EXPECTED = fileURLToPath(new URL('./expected/session-list-pages/', import.meta.url))
++
++describe('web e2e: progressive Session list', () => {
++  let scaffold: WebScaffold
++  let browser: Browser
++  let page: Page
++  let releaseOlder: (() => void) | undefined
++  let pages = 0
++  const errors: string[] = []
++
++  beforeAll(async () => {
++    await mkdir(EXPECTED, { recursive: true })
++    scaffold = await launchWebScaffold({})
++    const fixture = await readFile(SEED, 'utf8')
++    const workspace = await scaffold.ctx.workspaceRegistry.create(scaffold.workspaceCwd)
++    const now = Date.now()
++    for (let i = 0; i < 9; i++) {
++      const id = await seedSession(scaffold, fixture, `paged-session-${i}`, undefined, {
++        createdAt: now - (i + 1) * 60_000,
++      })
++      await workspace.attachSession(id)
++      await scaffold.ctx.sessionController.rename({ sessionId: id, title: `Paged conversation ${i}` })
++    }
++    browser = await chromium.launch()
++    page = await newEnglishPage(browser)
++    await page.clock.setFixedTime(now)
++    page.on('pageerror', (error) => { errors.push(error.message) })
++    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()) })
++    await page.addInitScript((account) => {
++      localStorage.setItem('dsh.workspace.view.v5', JSON.stringify({
++        groupBy: 'workspace', orderBy: 'updated', groupExpansion: { [account]: true },
++        sessionOrderByAccount: {},
++      }))
++    }, workspace.id)
++    await page.route('**/api/session/list', async (route) => {
++      const body = route.request().postDataJSON() as { payload: { args: { _request: { cursor?: string } } } }
++      const request = body.payload.args._request
++      pages++
++      if (request.cursor !== undefined) {
++        await new Promise<void>((resolve) => { releaseOlder = resolve })
++      }
++      await route.continue()
++    })
++    await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
++  })
++
++  afterAll(async () => {
++    releaseOlder?.()
++    await browser?.close()
++    await scaffold?.close()
++  })
++
++  it('renders recent rows before older pages and keeps them interactive', async () => {
++    onTestFailed(() => { console.info(JSON.stringify({ errors: errors.map(error => error.split('\n')[0]) })) })
++    await expect.poll(() => releaseOlder !== undefined, { timeout: 30_000 }).toBe(true)
++    const expand = page.getByRole('button', { name: 'Open sidebar', exact: true })
++    if (await expand.count() !== 0) await expand.click()
++    await expect.poll(() => page.getByText('Paged conversation 0', { exact: true }).count(), { timeout: 10_000 }).toBe(1)
++    expect(await page.getByText('Paged conversation 8', { exact: true }).count()).toBe(0)
++    await compareOrRefreshGolden(join(EXPECTED, 'first-page.expected.md'),
++      await captureStableAria(page, '[role="tree"][aria-label="Sessions"]', scaffold.workspaceCwd, { normalizeAge: true }), webSnapshotMode())
++    await page.getByText('Paged conversation 0', { exact: true }).click()
++    await expect.poll(() => page.evaluate(() => {
++      const selection: unknown = JSON.parse(localStorage.getItem('dsh.sessions.current') ?? '{}')
++      return typeof selection === 'object' && selection !== null && 'sessionId' in selection ? selection.sessionId : undefined
++    }))
++      .toBe('paged-session-0')
++    releaseOlder?.()
++    await expect.poll(() => page.getByRole('button', { name: 'Show 4 more sessions' }).count()).toBe(1)
++    await page.getByRole('button', { name: 'Show 4 more sessions' }).click()
++    await expect.poll(() => page.getByText('Paged conversation 8', { exact: true }).count()).toBe(1)
++    expect(pages).toBe(2)
++    expect(errors).toEqual([])
++  })
++})
+diff --git a/packages/api/session-controller/README.i18n.yaml b/packages/api/session-controller/README.i18n.yaml
+index 0e8234975a..7687f0ac9d 100644
+--- a/packages/api/session-controller/README.i18n.yaml
++++ b/packages/api/session-controller/README.i18n.yaml
+@@ -15,8 +15,8 @@
+   en: 1fdf707322fb6996
+   zh: 0204f7e9d4aa3cce
+ /session-controller/use-this-package:
+-  en: 77552723167e5d8e
+-  zh: 1d77a657c707190a
++  en: a2619c637215e567
++  zh: b6594a88b6b0af37
+ /session-controller/client-references:
+   en: 41bdda1ac32df558
+   zh: aa5d0e325924066b
+@@ -24,8 +24,8 @@
+   en: 266ab2b1e2fec542
+   zh: b3450ae28a1e0baf
+ /session-controller/configuration:
+-  en: 5ae2b340c630897f
+-  zh: 1ffbd61ecf302ec2
++  en: f4e934b4abb1ae81
++  zh: e786ebcbbcb0489d
+ /session-controller/model-experience:
+   en: 30b917bf822bb4df
+   zh: b0b023b5b526c317
+diff --git a/packages/api/session-controller/README.md b/packages/api/session-controller/README.md
+index d5739619c1..c82bdfa824 100644
+--- a/packages/api/session-controller/README.md
++++ b/packages/api/session-controller/README.md
+@@ -41,6 +41,8 @@ Explicit-id `session.create` adopts a live Session or resumes a persisted Sessio
+ 
+ Client list refreshes retain unchanged row objects and reuse the items array when order and values match. Each row's `retainedBy` contains positive local reference-source counts; Host metadata refreshes cannot overwrite them. Cache membership checks use a per-refresh ID set, so reconciliation grows linearly with the current list and retained cache sizes. Host summary updates replace running and Agent availability; local create/fork responses only fill missing metadata on existing rows. Removed ordinary Sessions retain projection stores only when their catalogs contain children.
+ 
++The Web client opts into `session.list({ paged: true })`: the first page contains recent rows from each workspace and running or blank Sessions; older rows follow in bounded pages of the same catalog snapshot. Each successful page becomes visible immediately. Partial refreshes retain established rows, replay concurrent host updates, and defer removal reconciliation until the final page. `SessionListState.complete` distinguishes partial arrival from a complete empty catalog. Requests without `paged` retain complete-list behavior; continuation cursors expire after `listSnapshotTtlMs` or snapshot eviction. The first request still discovers every header, while continuation pages reuse that discovery and project only their selected rows.
++
+ Background-job rows and observation streams belong to [`dsh-api-job-controller`](../job-controller/README.md); the control stream carries projections only.
+ 
+ Projection reads retain loading and failure state independently of their values. Reconnect cancels reads from the previous connection and reloads previously requested projections; live membership updates arrive through the control stream. Parent availability comes from Host summaries and remains unknown until a summary or a successful list baseline establishes it. Address lookup resolves projected children without selecting them or creating scopes.
+@@ -95,6 +97,10 @@ A successful `selectModel` response acknowledges the Session-local selection wit
+ |---|---:|---|
+ | `nativeOpen` | platform-detected | Whether Session workspace paths can be handed to a native desktop opener |
+ | `listWorkSliceMs` | `16` | Positive integral list-work time slice in milliseconds; checks occur between complete rows |
++| `listPageSize` | `50` | Historical rows per continuation page |
++| `listInitialPerWorkspace` | `5` | Recent idle root rows per workspace on the first page |
++| `listSnapshotLimit` | `8` | Maximum retained catalog snapshots |
++| `listSnapshotTtlMs` | `60000` | Continuation lifetime in milliseconds |
+ 
+ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-api-session-controller) is the exhaustive source for accepted fields and their JSDoc.
+ 
+diff --git a/packages/api/session-controller/README.zh.md b/packages/api/session-controller/README.zh.md
+index eb33197fa9..1479c14822 100644
+--- a/packages/api/session-controller/README.zh.md
++++ b/packages/api/session-controller/README.zh.md
+@@ -41,6 +41,8 @@ Client 列表行和驻留 Session 使用当前 `sessionListMetadata` 投影纠
+ 
+ Client 列表刷新保留未变化的行对象，并在顺序和值均相同时复用条目数组。每行的 `retainedBy` 包含正数的本地引用来源计数，Host 元数据刷新不能覆盖它们。缓存成员检查使用每次刷新构建的 ID 集合，因此对账成本随当前列表和保留缓存的规模线性增长。 Host 摘要更新会替换运行状态与 Agent 可用性；本地 create/fork 响应只补充已有行缺失的元数据。普通 Session 被移除后，仅在目录仍有子项时保留其投影 store。
+ 
++Web 客户端通过 `session.list({ paged: true })` 分批读取：首批包含各工作区最近会话、运行中会话和空白会话，旧会话随后从同一次目录快照分批补齐。每批成功后立即显示；未加载完时保留已有列表，合并加载期间的实时更新，最后一批到达后才核对删除。`SessionListState.complete` 区分部分到达与完整空列表。不传 `paged` 时仍返回完整列表；游标在 `listSnapshotTtlMs` 到期或快照淘汰后失效。首次请求仍发现全部 header，后续页复用发现结果，仅生成本页的完整投影。
++
+ 后台 job 的名册行与观测流属于 [`dsh-api-job-controller`](../job-controller/README.zh.md)；控制流只承载投影。
+ 
+ 投影读取独立于其值保留加载与失败状态。重连会取消上一连接的读取，并重新加载已请求的投影；实时成员更新通过 control stream 到达。父 Agent 可用性来自 Host 摘要，在收到对应摘要或成功的列表 baseline 前保持未知。地址查找直接解析投影中的子项，不会选择它们或创建 scope。
+@@ -51,7 +53,6 @@ Client 适配器提供 `SessionEventStream`，即绑定到一个普通 Session 
+ 
+ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用方序列化与提示词之前，同步把一条回显写入 `SessionSnapshot.pendingSubmissions`，会话 UI 因此能在点击提交的当帧显示消息。回显按顺序存放图片预览与持久文件引用。Session 根据当前运行状态与请求的投递模式推导其 `transcript`、`queued` 或 `steering` 位置，并保留该位置直到展示接管。提示词的 `requestId` 是关联标识：Host 把它回显为 durable user source 的 `rpcId`，`inbox` 投影中的待处理消息也保留同一 source。排队回显在队列接受后延迟一个动画帧退休；Chat 回显遵循下述入档规则。尚未入档的回显在带标识的提示词失败或被放弃时立即退休。销毁时保留已观察到的入档结果，其余未结算提交按 failed 退休。每次退休恰好触发一次 `onRetire`；observed 退休还会携带有序的持久附件引用，让 composer 释放成功卡片并保留失败草稿。回显只存在于 Client 内存；刷新与重连只从持久事件重建会话。
+ 
+-
+ 正常在线时，transcript 与 steering 回显在 Inbox 接受与领取期间留在 Chat，直到持久消息到达。本地 Chat 消息入档后，其身份保留到 Inbox 水位覆盖 next-turn 或 next-step 领取序号：Chat 已显示真实 Node，而 Chat 与 QueueDock 排除匹配的旧 Inbox 行。其他排队消息照常显示。新的 follow 基线会将已有接收回执的回显按 observed 撤去，使用已接受的附件引用完成结算；尚未确认接收的提交继续保留。待处理或已入档的消息随后由 Host 数据呈现。在领取与入档之间重连时，气泡可能短暂消失；撤去回显只确认接收，不代表执行或失败。
+ 
+ 面向用户调用的 `skills/list` 元数据包含胜出提供方可选的指令文件 `path`。输入框可据此预览文件，无需加载每个 skill 的正文或激活冷态 Agent。
+@@ -95,6 +96,10 @@ GUI 模型选择要求确切提供方／模型对出现在可用目录中；不
+ |---|---:|---|
+ | `nativeOpen` | 平台探测 | 是否能把 Session 工作区路径交给原生桌面打开器 |
+ | `listWorkSliceMs` | `16` | 列表工作时间片，单位为毫秒，取正整数；在完整条目之间检查 |
++| `listPageSize` | `50` | 每个后续页的旧会话数量 |
++| `listInitialPerWorkspace` | `5` | 首批每个工作区的最近空闲根会话数量 |
++| `listSnapshotLimit` | `8` | 同时保留的目录快照上限 |
++| `listSnapshotTtlMs` | `60000` | 游标有效期，单位为毫秒 |
+ 
+ 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-api-session-controller)是所有受支持字段及其 JSDoc 的完整来源。
+ 
+@@ -121,7 +126,6 @@ GUI 模型选择要求确切提供方／模型对出现在可用目录中；不
+ - 受理/运行的展示记忆只存在于客户端内存，页面重载后即丢失。
+ - 该记忆不在 tab 之间共享：同一会话可能在一个 tab 中已转正，在另一个 tab 中仍显示为 `New Session`。
+ 
+-
+ <a id="dev-note"></a>
+ ### 开发备注
+ 
+diff --git a/packages/api/session-controller/src/client/sessions/manager.ts b/packages/api/session-controller/src/client/sessions/manager.ts
+index 50af09df13..4270b29715 100644
+--- a/packages/api/session-controller/src/client/sessions/manager.ts
++++ b/packages/api/session-controller/src/client/sessions/manager.ts
+@@ -14,7 +14,7 @@ import type {
+ import { mergeOrderedBaseline } from '../ordered-baseline.ts'
+ import { isRemoteFailure } from '@deepseek-ai/dsh-api-gateway/client'
+ import { assertNever } from '@deepseek-ai/dsh-util-values'
+-import type { RemoteFailure, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
++import { RemoteError, type RemoteFailure, type RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+ import type { SessionListEntry, TitledSessionSummary } from './lineage.ts'
+ import { flattenLineage } from './lineage.ts'
+ // Type-only merge edge: the title domain's client-namespace outlet declares
+@@ -53,6 +53,8 @@ export interface SessionListSnapshot {
+   state: 'idle' | 'loading' | 'error'
+   /** Arrival lifecycle (see {@link SessionListPhase}); `state` stays the pull-activity axis. */
+   phase: SessionListPhase
++  /** False while older catalog pages have not arrived. */
++  complete: boolean
+   error: RemoteFailure | null
+   projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>
+ 
+@@ -103,6 +105,7 @@ export class SessionManager {
+   private listState: 'idle' | 'loading' | 'error' = 'idle'
+   /** Arrival phase; the pending → ready edge fires on the first successful pull (see SessionListPhase). */
+   private listPhase: SessionListPhase = 'pending'
++  private listComplete = false
+   private listError: RemoteFailure | null = null
+   private listInflight: Promise<void> | null = null
+   /** Active list request's mutation log; its identity also fences completion after reconnect. */
+@@ -377,7 +380,7 @@ export class SessionManager {
+ 
+   private agentAvailable(sessionId: SessionId): boolean | undefined {
+     return this.summaries.find(summary => summary.sessionId === sessionId)?.agentAvailable
+-      ?? (this.listPhase === 'ready' ? false : undefined)
++      ?? (this.listComplete ? false : undefined)
+   }
+ 
+   private updateParentAvailability(): void {
+@@ -389,57 +392,80 @@ export class SessionManager {
+ 
+   // ---- List API ----
+ 
+-  /** Full refresh via session.list (single-flight within one Host generation). */
++  /** Refresh pages in one Host generation, publishing each successful page immediately. */
+   refreshList(): Promise<void> {
+     if (this.listInflight !== null) return this.listInflight
+     this.listState = 'loading'
+     this.listError = null
++    this.listComplete = false
+     const established = this.summaries
+     const mutations: SessionListMutation[] = []
+     this.listMutations = mutations
+     this.notifier.markDirty()
+     this.listInflight = (async () => {
+       try {
+-        const result = await this.remote.session.list({})
+-        if (this.listMutations !== mutations) return
+-        if (result.ok) {
+-          const baseline: SessionSummary[] = this.listPhase === 'pending'
+-            ? [...result.value.items]
+-            : mergeOrderedBaseline(established, result.value.items, summary => summary.sessionId)
+-          // A removal supersedes running observed in the pull, including after re-addition.
+-          const removedSincePull = new Set<SessionId>()
+-          for (const mutation of mutations) {
+-            if (mutation.kind === 'remove') removedSincePull.add(mutation.sessionId)
+-          }
+-          for (const s of baseline) {
+-            if (s.running && !removedSincePull.has(s.sessionId)) this.engagedSessions.add(s.sessionId)
+-          }
+-          const summaries = mutations.reduce(applyMutation, baseline)
+-          this.summaries = summaries
+-          // A full list can remove identities without a removal frame.
+-          const retained = this.retainedIds(summaries)
+-          for (const sessionId of this.engagedSessions) this.pruneEngagement(sessionId, retained)
+-          this.listState = 'idle'
+-          this.listPhase = 'ready'
+-          this.updateParentAvailability()
+-          // Resident Sessions and list rows share one display blank, reconciled with the metadata projection.
+-          for (const s of this.summaries) {
+-            const session = this.sessions.get(s.sessionId)
+-            if (session === undefined) continue
+-            session.handleBlank(this.effectiveBlank(s))
+-            session.handleRunning(s.running)
++        const received = new Map<SessionId, SessionSummary>()
++        const seenCursors = new Set<string>()
++        let cursor: string | undefined
++        do {
++          const result = await this.remote.session.list({ paged: true, ...(cursor === undefined ? {} : { cursor }) })
++          if (this.listMutations !== mutations) return
++          if (result.ok) {
++            for (const item of result.value.items) received.set(item.sessionId, item)
++            cursor = result.value.nextCursor
++            if (cursor !== undefined && seenCursors.has(cursor)) {
++              this.listState = 'error'
++              this.listError = new RemoteError('gateway/internal', 'session list cursor did not advance', {})
++              return
++            }
++            if (cursor !== undefined) seenCursors.add(cursor)
++            this.listComplete = cursor === undefined
++            const fetched = [...received.values()]
++            const pendingIds = new Set(received.keys())
++            const available = this.listComplete ? fetched
++              : [...fetched, ...established.filter(summary => !pendingIds.has(summary.sessionId))]
++            const baseline: SessionSummary[] = this.listPhase === 'pending'
++              ? available
++              : mergeOrderedBaseline(established, available, summary => summary.sessionId)
++            // A removal supersedes running observed in the pull, including after re-addition.
++            const removedSincePull = new Set<SessionId>()
++            for (const mutation of mutations) {
++              if (mutation.kind === 'remove') removedSincePull.add(mutation.sessionId)
++            }
++            for (const s of baseline) {
++              if (s.running && !removedSincePull.has(s.sessionId)) this.engagedSessions.add(s.sessionId)
++            }
++            const summaries = mutations.reduce(applyMutation, baseline)
++            this.summaries = summaries
++            // A full list can remove identities without a removal frame.
++            if (this.listComplete) {
++              const retained = this.retainedIds(summaries)
++              for (const sessionId of this.engagedSessions) this.pruneEngagement(sessionId, retained)
++            }
++            this.listState = this.listComplete ? 'idle' : 'loading'
++            this.listPhase = 'ready'
++            this.updateParentAvailability()
++            // Resident Sessions and list rows share one display blank, reconciled with the metadata projection.
++            for (const s of this.summaries) {
++              const session = this.sessions.get(s.sessionId)
++              if (session === undefined) continue
++              session.handleBlank(this.effectiveBlank(s))
++              session.handleRunning(s.running)
++            }
++            // Land each row's projection block in the per-session value store
++            // (cold titles surface without opening the session). A list block is
++            // partial — only the keys its source holds — so an absent key never
++            // clears; how the present keys merge depends on the block's kind.
++            for (const s of result.value.items) {
++              if (s.projections !== undefined) this.applyListBlock(s.sessionId, s.projections)
++            }
++            this.notifier.markDirty()
++          } else {
++            this.listState = 'error'
++            this.listError = result.error
++            return
+           }
+-          // Land each row's projection block in the per-session value store
+-          // (cold titles surface without opening the session). A list block is
+-          // partial — only the keys its source holds — so an absent key never
+-          // clears; how the present keys merge depends on the block's kind.
+-          for (const s of result.value.items) {
+-            if (s.projections !== undefined) this.applyListBlock(s.sessionId, s.projections)
+-          }
+-        } else {
+-          this.listState = 'error'
+-          this.listError = result.error
+-        }
++        } while (cursor !== undefined)
+       } catch (error) {
+         if (!isRemoteFailure(error)) throw error
+         if (this.listMutations !== mutations) return
+@@ -789,6 +815,7 @@ export class SessionManager {
+       items: this.itemsCache,
+       state: this.listState,
+       phase: this.listPhase,
++      complete: this.listComplete,
+       error: this.listError,
+       projectionsBySession: Object.fromEntries([...this.projectionStores].map(([sessionId, store]) => [
+         sessionId,
+diff --git a/packages/api/session-controller/src/client/sessions/service.ts b/packages/api/session-controller/src/client/sessions/service.ts
+index 8166b6f32d..5fee959da8 100644
+--- a/packages/api/session-controller/src/client/sessions/service.ts
++++ b/packages/api/session-controller/src/client/sessions/service.ts
+@@ -56,8 +56,10 @@ export interface SessionListState {
+   ids: SessionId[]
+   /** Host/catalog rows plus retained subagent fallbacks; only `ids` expresses Host-list membership. */
+   byId: Record<SessionId, SessionSummary>
+-  /** Arrival lifecycle projected 1:1 from the manager snapshot (see SessionListPhase): empty-with-ready means "truly no sessions". */
++  /** First-page arrival lifecycle; an empty catalog is authoritative only when complete is true. */
+   phase: SessionListPhase
++  /** False while historical pages remain; omitted legacy snapshots are complete. */
++  complete?: boolean
+   /** Shared projection values and explicit-read state, including unopened Sessions. */
+   projectionsBySession: Readonly<Record<SessionId, SessionProjectionSnapshot>>
+ }
+@@ -609,7 +611,7 @@ export class ClientSessions implements ISessions {
+   private projectList(): void {
+     const previousById = this.list.getSnapshot().byId
+     const {
+-      items, phase, projectionsBySession,
++      items, phase, complete, projectionsBySession,
+     } = this.manager.getListSnapshot()
+     const ids: SessionId[] = []
+     const byId: Record<SessionId, SessionSummary> = {}
+@@ -676,7 +678,7 @@ export class ClientSessions implements ISessions {
+         ...(title === undefined ? {} : { title, displayTitle: title }),
+       }
+     }
+-    this.list.set({ ids, byId, phase, projectionsBySession })
++    this.list.set({ ids, byId, phase, complete, projectionsBySession })
+   }
+ 
+   private startScopeDrop(
+diff --git a/packages/api/session-controller/src/index.ts b/packages/api/session-controller/src/index.ts
+index 8e38822fbc..65d58af7c4 100644
+--- a/packages/api/session-controller/src/index.ts
++++ b/packages/api/session-controller/src/index.ts
+@@ -81,10 +81,24 @@ export interface Config {
+   readonly nativeOpen?: boolean
+   /** Positive integral milliseconds of list work before yielding between complete rows. */
+   readonly listWorkSliceMs?: number
++  /** Maximum historical rows returned by each continuation page. */
++  readonly listPageSize?: number
++  /** Recent idle rows selected per workspace for the first page. */
++  readonly listInitialPerWorkspace?: number
++  /** Maximum concurrent retained catalog snapshots. */
++  readonly listSnapshotLimit?: number
++  /** Catalog continuation lifetime in milliseconds. */
++  readonly listSnapshotTtlMs?: number
+ }
+ 
+ /** Deployment policy after schema defaults have been applied. */
+-type ResolvedConfig = Config & { readonly listWorkSliceMs: number }
++type ResolvedConfig = Config & {
++  readonly listWorkSliceMs: number
++  readonly listPageSize: number
++  readonly listInitialPerWorkspace: number
++  readonly listSnapshotLimit: number
++  readonly listSnapshotTtlMs: number
++}
+ 
+ /** Host integrations replaceable by direct unit tests. */
+ export interface SessionControllerInternals {
+@@ -119,6 +133,10 @@ export class SessionController extends TypertRemoteService {
+   static Config: z<Config, ResolvedConfig> = z.object({
+     nativeOpen: z.boolean(),
+     listWorkSliceMs: z.natural().min(1).default(16),
++    listPageSize: z.natural().min(1).default(50),
++    listInitialPerWorkspace: z.natural().min(1).default(5),
++    listSnapshotLimit: z.natural().min(1).default(8),
++    listSnapshotTtlMs: z.natural().min(1).default(60_000),
+   })
+ 
+   private readonly agents: ApiSessionAgentController
+@@ -126,6 +144,7 @@ export class SessionController extends TypertRemoteService {
+   private readonly controlState: SessionControlController
+   private readonly history: SessionHistoryController
+   private readonly listState: ApiSessionList
++  private readonly listPolicy: ResolvedConfig
+   private readonly openPath: (path: string, signal: AbortSignal) => Promise<void>
+   private readonly fileApplications: typeof nativeFileApplications
+   private readonly openFileApplication: typeof openNativeFileApplication
+@@ -141,6 +160,7 @@ export class SessionController extends TypertRemoteService {
+   constructor(ctx: Context, config: Config, internals: SessionControllerInternals = {}) {
+     super(ctx, 'sessionController', { namespace: 'session' })
+     const resolved = SessionController.Config(config)
++    this.listPolicy = resolved
+     installModelSelectionProjection(ctx)
+     this.agents = new ApiSessionAgentController(ctx)
+     this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
+@@ -250,13 +270,17 @@ export class SessionController extends TypertRemoteService {
+   }
+ 
+   /**
+-   * Read all visible Session rows without resuming an Agent.
+-   * @param _request - reserved empty list request.
++   * Read visible Session rows without resuming an Agent.
++   * @param _request - full-list selection or continuation of a bounded snapshot.
+    * @param signal - cancellation for persistence reads and summary generation.
+    * @returns visible Session summaries ordered by activity.
+    */
+   @Remote('list')
+   async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue> {
++    const request = _request
++    if (request.paged || request.cursor !== undefined) {
++      return this.listState.page(request, this.listPolicy, signal)
++    }
+     return { items: await this.listState.list(signal) }
+   }
+ 
+diff --git a/packages/api/session-controller/src/list.ts b/packages/api/session-controller/src/list.ts
+index c51d119805..fc46e3e1dd 100644
+--- a/packages/api/session-controller/src/list.ts
++++ b/packages/api/session-controller/src/list.ts
+@@ -1,6 +1,7 @@
+ /** Cold-safe Session list and search projection. */
+ 
+ import { performance } from 'node:perf_hooks'
++import { randomUUID } from 'node:crypto'
+ import { scheduler } from 'node:timers/promises'
+ import type { Context } from '@deepseek-ai/cordis'
+ import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+@@ -18,8 +19,22 @@ import {
+ import type {
+   SessionListMetadata, SessionProjectionHints, SessionProjectionValues, SessionSearchItem,
+   SessionSearchValue, SessionSummary,
++  SessionListRequest, SessionListValue,
+ } from './types.ts'
+ 
++/** Resolved deployment limits for process-local list continuations. */
++interface ListPagePolicy {
++  readonly listPageSize: number
++  readonly listInitialPerWorkspace: number
++  readonly listSnapshotLimit: number
++  readonly listSnapshotTtlMs: number
++}
++
++interface ListCatalog {
++  readonly headers: readonly SessionHeader[]
++  readonly expiresAt: number
++}
++
+ const SEARCH_PROVIDER_CALL_LIMIT = 100
+ const SESSION_SEARCH_QUERY_MAX_CHARS = 500
+ const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
+@@ -76,11 +91,13 @@ export function truncateUnicodeCodePoints(value: string, maximum: number): strin
+ 
+ /** Owns list projection registration, bounded cold summaries, and authorized search. */
+ export class ApiSessionList {
++  private readonly catalogs = new Map<string, ListCatalog>()
+   /**
+    * @param ctx - Host context carrying Session, query, persistence, and projection services.
+    * @param workSliceMs - Resolved positive integral list-work budget in milliseconds.
+    */
+   constructor(private readonly ctx: Context, private readonly workSliceMs: number) {
++    ctx.effect(() => () => { this.catalogs.clear() }, 'api-session.listCatalogs')
+     ctx.sessionProjections.register<'sessionListMetadata', SessionListMetadata>({
+       key: 'sessionListMetadata',
+       stateSchema: sessionListMetadataSchema,
+@@ -104,6 +121,101 @@ export class ApiSessionList {
+     })
+   }
+ 
++  /**
++   * Read recent workspace rows first, then bounded historical pages from the same ordering.
++   * @param request - opt-in first page or process-local continuation cursor.
++   * @param policy - resolved page size and snapshot retention limits.
++   * @param signal - cancellation of catalog reads and page projection.
++   * @returns one page and an optional continuation; cold Agents remain inactive.
++   */
++  async page(request: SessionListRequest, policy: ListPagePolicy, signal?: AbortSignal): Promise<SessionListValue> {
++    signal?.throwIfAborted()
++    const now = performance.now()
++    for (const [key, catalog] of this.catalogs) {
++      if (catalog.expiresAt <= now) this.catalogs.delete(key)
++    }
++    let token: string
++    let catalog: ListCatalog
++    let offset: number
++    if (request.cursor !== undefined) {
++      const parts = request.cursor.split(':')
++      token = parts[0] ?? ''
++      offset = Number(parts[1])
++      const existing = this.catalogs.get(token)
++      if (parts.length !== 2 || !/^[0-9]+$/.test(parts[1] ?? '')
++        || !Number.isSafeInteger(offset) || offset < 0 || existing === undefined
++        || offset >= existing.headers.length) {
++        throw new RemoteError('gateway/bad-request', 'session list cursor expired or invalid', {})
++      }
++      catalog = existing
++    } else {
++      const records = await this.ctx.sessionQuery.listSessions(signal)
++      const ranked: Array<{ header: SessionHeader; updatedAt: number; priority: boolean }> = []
++      let deadline = performance.now() + this.workSliceMs
++      for (const { header } of records) {
++        signal?.throwIfAborted()
++        const live = this.ctx.sessions.get(header.id)
++        if (live === undefined && header.cwd === undefined) continue
++        const block = live === undefined
++          ? this.ctx.get('sessionProjectionCache')?.cachedSnapshot(header, ['sessionListMetadata'])
++          : this.ctx.sessionProjections.cachedSnapshot(live, ['sessionListMetadata'])
++        const metadata = block?.values.sessionListMetadata
++        ranked.push({
++          header, updatedAt: updatedAt(header, metadata),
++          priority: this.ctx.agents.get(header.id)?.status === 'running' || metadata?.blank === true,
++        })
++        if (performance.now() >= deadline) {
++          await scheduler.yield()
++          deadline = performance.now() + this.workSliceMs
++        }
++      }
++      ranked.sort((left, right) => right.updatedAt - left.updatedAt
++        || (left.header.id < right.header.id ? -1 : left.header.id > right.header.id ? 1 : 0))
++      const initial: SessionHeader[] = []
++      const older: SessionHeader[] = []
++      const workspaceCounts = new Map<string | undefined, number>()
++      for (const row of ranked) {
++        const count = workspaceCounts.get(row.header.cwd) ?? 0
++        if (row.priority || (row.header.origin !== 'subagent' && count < policy.listInitialPerWorkspace)) {
++          initial.push(row.header)
++          if (!row.priority) workspaceCounts.set(row.header.cwd, count + 1)
++        } else older.push(row.header)
++      }
++      signal?.throwIfAborted()
++      token = randomUUID()
++      catalog = { headers: [...initial, ...older], expiresAt: performance.now() + policy.listSnapshotTtlMs }
++      offset = 0
++      while (this.catalogs.size >= policy.listSnapshotLimit) {
++        const first = this.catalogs.keys().next().value
++        if (first === undefined) break
++        this.catalogs.delete(first)
++      }
++      if (older.length > 0) this.catalogs.set(token, catalog)
++      return this.projectPage(catalog, token, offset, initial.length, signal)
++    }
++    return this.projectPage(catalog, token, offset, policy.listPageSize, signal)
++  }
++
++  private async projectPage(
++    catalog: ListCatalog, token: string, offset: number, limit: number, signal?: AbortSignal,
++  ): Promise<SessionListValue> {
++    const selected = catalog.headers.slice(offset, offset + limit)
++    const items: SessionSummary[] = []
++    let deadline = performance.now() + this.workSliceMs
++    for (const header of selected) {
++      signal?.throwIfAborted()
++      const live = this.ctx.sessions.get(header.id)
++      items.push(live === undefined ? this.summarizeCold(header) : this.summaryFor(live))
++      if (performance.now() >= deadline) {
++        await scheduler.yield()
++        deadline = performance.now() + this.workSliceMs
++      }
++    }
++    signal?.throwIfAborted()
++    const next = offset + selected.length
++    return { items, ...(next < catalog.headers.length ? { nextCursor: `${token}:${String(next)}` } : {}) }
++  }
++
+   /**
+    * Build one current attached-Session summary.
+    * @param session - attached Session to summarize.
+diff --git a/packages/api/session-controller/src/types.ts b/packages/api/session-controller/src/types.ts
+index a8f0d7e450..20048312dd 100644
+--- a/packages/api/session-controller/src/types.ts
++++ b/packages/api/session-controller/src/types.ts
+@@ -262,12 +262,17 @@ export interface SkillListValue {
+ 
+ /** Session list request. */
+ export interface SessionListRequest {
++  /** Opt into bounded pages; omitted requests retain the complete-list behavior. */
++  readonly paged?: boolean
++  /** Continuation of one process-local catalog snapshot. */
+   readonly cursor?: string
+ }
+ 
+ /** Session list response value. */
+ export interface SessionListValue {
+   readonly items: readonly SessionSummary[]
++  /** Absent after the complete snapshot has been served. */
++  readonly nextCursor?: string
+ }
+ 
+ /** Session search request. */
+diff --git a/packages/api/session-controller/tests/list-scheduling.host.spec.ts b/packages/api/session-controller/tests/list-scheduling.host.spec.ts
+index eefea76713..dca3b1bcb2 100644
+--- a/packages/api/session-controller/tests/list-scheduling.host.spec.ts
++++ b/packages/api/session-controller/tests/list-scheduling.host.spec.ts
+@@ -20,6 +20,7 @@ interface Row {
+ }
+ 
+ const contexts = new Set<Context>()
++const pagePolicy = { listPageSize: 2, listInitialPerWorkspace: 1, listSnapshotLimit: 2, listSnapshotTtlMs: 1000 }
+ const immediates = new Set<ReturnType<typeof setImmediate>>()
+ 
+ afterEach(async () => {
+@@ -99,6 +100,58 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
+   return { ctx, list, listSessions, trace, observer, attach, agents, detach, clock }
+ }
+ 
++describe('Session-list pages', () => {
++  it('keeps running rows first without moving every attached idle Session into the first page', async () => {
++    const h = await harness(['a', 'b', 'c', 'd'].map(id => ({ id, phase: 'live' as const })), 0)
++    vi.spyOn(h.ctx.sessionProjections, 'cachedSnapshot').mockReturnValue({
++      asOfSeq: -1, values: { sessionListMetadata: { blank: false, lastPromptAt: null } },
++    })
++    h.agents.get('d')!.status = 'running'
++    const first = await h.list.page({ paged: true }, pagePolicy)
++    expect(first.items.map(row => row.sessionId)).toEqual(['a', 'd'])
++    expect(first.nextCursor).toBeDefined()
++  })
++  it('serves each workspace newest first and reuses one scan for every continuation', async () => {
++    const h = await harness(Array.from({ length: 6 }, (_, i) => ({ id: `row-${i}`, phase: 'cold' as const })), 0)
++    const records = await h.listSessions()
++    h.listSessions.mockClear()
++    records.forEach((record, i) => {
++      record.header = { ...record.header, createdAt: i, cwd: i % 2 === 0 ? '/a' : '/b' }
++    })
++    const cache = vi.spyOn(h.ctx.sessionProjectionCache, 'cachedSnapshot')
++    const first = await h.list.page({ paged: true }, pagePolicy)
++    expect(first.items.map(row => row.sessionId)).toEqual(['row-5', 'row-4'])
++    expect(cache.mock.calls.filter(([, keys]) => keys === undefined)).toHaveLength(2)
++    const second = await h.list.page({ cursor: first.nextCursor }, pagePolicy)
++    const last = await h.list.page({ cursor: second.nextCursor }, pagePolicy)
++    expect([...first.items, ...second.items, ...last.items].map(row => row.sessionId))
++      .toEqual(['row-5', 'row-4', 'row-3', 'row-2', 'row-1', 'row-0'])
++    expect(last.nextCursor).toBeUndefined()
++    expect(h.listSessions).toHaveBeenCalledTimes(1)
++    expect(h.ctx.sessions.list()).toEqual([])
++  })
++
++  it('rejects malformed, expired, and evicted cursors', async () => {
++    const h = await harness([{ id: 'one', phase: 'cold' }, { id: 'two', phase: 'cold' }], 0)
++    await expect(h.list.page({ cursor: 'bad' }, pagePolicy)).rejects.toThrow('cursor expired or invalid')
++    const first = await h.list.page({ paged: true }, pagePolicy)
++    h.clock.now = 1001
++    await expect(h.list.page({ cursor: first.nextCursor }, pagePolicy)).rejects.toThrow('cursor expired or invalid')
++    h.clock.now = 0
++    const old = await h.list.page({ paged: true }, { ...pagePolicy, listSnapshotLimit: 1 })
++    await h.list.page({ paged: true }, { ...pagePolicy, listSnapshotLimit: 1 })
++    await expect(h.list.page({ cursor: old.nextCursor }, pagePolicy)).rejects.toThrow('cursor expired or invalid')
++  })
++
++  it('keeps the full-list request complete and aborts page reads', async () => {
++    const h = await harness([{ id: 'one', phase: 'cold' }, { id: 'two', phase: 'cold' }], 0)
++    expect(await h.list.list()).toHaveLength(2)
++    const controller = new AbortController()
++    controller.abort(new Error('cancel listing'))
++    await expect(h.list.page({ paged: true }, pagePolicy, controller.signal)).rejects.toThrow('cancel listing')
++  })
++})
++
+ describe('Session-list work slices', () => {
+   it.each<Phase>(['live', 'cold'])('keeps cheap %s summaries in one synchronous slice', async (phase) => {
+     const h = await harness([{ id: 'first', phase }, { id: 'middle', phase }, { id: 'last', phase }], 2)
+diff --git a/packages/api/session-controller/tests/manager.client.spec.ts b/packages/api/session-controller/tests/manager.client.spec.ts
+index 4cab61367e..7487952d90 100644
+--- a/packages/api/session-controller/tests/manager.client.spec.ts
++++ b/packages/api/session-controller/tests/manager.client.spec.ts
+@@ -1404,6 +1404,60 @@ describe('connected generation', () => {
+   })
+ })
+ 
++describe('progressive catalog loading', () => {
++  it('publishes the first page while older rows are pending and replays later removals', async ({ mock, remote }) => {
++    const manager = makeManager(mock, remote)
++    onTestFinished(() => manager.dispose())
++    const older = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
++    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)], nextCursor: 'older' }))
++    remote.session.list.mockReturnValueOnce(older.promise)
++    const refreshed = manager.refreshList()
++    await vi.waitFor(() => {
++      expect(manager.getListSnapshot()).toMatchObject({ phase: 'ready', state: 'loading', complete: false })
++      expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
++    })
++    manager.handleSessionRemoved(S1)
++    manager.handleSessionActivity(S2, 900)
++    older.resolve(ok({ items: [summary(S1), summary(S2)] }))
++    await refreshed
++    expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', complete: true })
++    expect(manager.getListSnapshot().items).toMatchObject([{ sessionId: S2, updatedAt: 900 }])
++    expect(remote.session.list.mock.calls.map(([request]) => request)).toEqual([
++      { paged: true }, { paged: true, cursor: 'older' },
++    ])
++  })
++
++  it('keeps received rows usable after an older-page failure and permits retry', async ({ mock, remote }) => {
++    const manager = makeManager(mock, remote)
++    onTestFinished(() => manager.dispose())
++    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)], nextCursor: 'older' }))
++    remote.session.list.mockResolvedValueOnce(err(new RemoteError('gateway/internal', 'older failed', {})))
++    await manager.refreshList()
++    expect(manager.getListSnapshot()).toMatchObject({ state: 'error', complete: false, phase: 'ready' })
++    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
++    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1), summary(S2)] }))
++    await manager.refreshList()
++    expect(manager.getListSnapshot()).toMatchObject({ state: 'idle', complete: true })
++    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1, S2])
++  })
++
++  it('retains established rows until the complete refresh can reconcile removals', async ({ mock, remote }) => {
++    const manager = makeManager(mock, remote)
++    onTestFinished(() => manager.dispose())
++    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1), summary(S2)] }))
++    await manager.refreshList()
++    const older = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
++    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1)], nextCursor: 'older' }))
++    remote.session.list.mockReturnValueOnce(older.promise)
++    const refreshed = manager.refreshList()
++    await vi.waitFor(() => { expect(remote.session.list).toHaveBeenCalledTimes(3) })
++    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1, S2])
++    older.resolve(ok({ items: [] }))
++    await refreshed
++    expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S1])
++  })
++})
++
+ describe('running facts without UI reminders', () => {
+   it('replays running status during hydration without publishing a completion marker', async ({ mock, remote }) => {
+     const response = Promise.withResolvers<Awaited<ReturnType<typeof remote.session.list>>>()
+diff --git a/packages/client/ui-session/src/client/index.ts b/packages/client/ui-session/src/client/index.ts
+index 5017904d86..a323f4bd5d 100644
+--- a/packages/client/ui-session/src/client/index.ts
++++ b/packages/client/ui-session/src/client/index.ts
+@@ -482,7 +482,8 @@ export class UiSession extends Service {
+ 
+   private observeRunning(sessionId: SessionId, running: boolean): void {
+     const previous = this.running.get(sessionId)
+-    const beforeBaseline = this.sessions.list.getSnapshot().phase === 'pending'
++    const catalog = this.sessions.list.getSnapshot()
++    const beforeBaseline = catalog.phase === 'pending' || catalog.complete === false
+     this.running.set(sessionId, running)
+     if (running) this.completionUnread.delete(sessionId)
+     else if ((previous === true || (previous === undefined && beforeBaseline))
+diff --git a/packages/session/session-persistence-jsonl/README.i18n.yaml b/packages/session/session-persistence-jsonl/README.i18n.yaml
+index af1e9e454c..c3527002ac 100644
+--- a/packages/session/session-persistence-jsonl/README.i18n.yaml
++++ b/packages/session/session-persistence-jsonl/README.i18n.yaml
+@@ -30,8 +30,8 @@
+   en: 1eaa87736cac029b
+   zh: 26224e8889786d69
+ /deepseek-ai-dsh-session-persistence-jsonl/use-this-package/reading-the-logs:
+-  en: c06983c4a73bebe1
+-  zh: 7319f8f44223685f
++  en: 5dd36f71a6d4ee88
++  zh: 6e3a263073649d60
+ /deepseek-ai-dsh-session-persistence-jsonl/understand-the-implementation:
+   en: a35407bb25671e7e
+   zh: 6a00f9510c85adcb
+@@ -45,8 +45,8 @@
+   en: 2a4fd4bde1da0a1b
+   zh: d7a8cbdad7beee09
+ /deepseek-ai-dsh-session-persistence-jsonl/further-exploration:
+-  en: 71fbff06a098440a
+-  zh: d3c07db42668ea18
++  en: 52b1c09e2bbcb66b
++  zh: 088f8fffb4640d33
+ /deepseek-ai-dsh-session-persistence-jsonl/model-experience:
+   en: 215e7ba838619b7b
+   zh: a311da3843709f90
+diff --git a/packages/session/session-persistence-jsonl/README.md b/packages/session/session-persistence-jsonl/README.md
+index 1fd862046f..c5a3939442 100644
+--- a/packages/session/session-persistence-jsonl/README.md
++++ b/packages/session/session-persistence-jsonl/README.md
+@@ -83,6 +83,8 @@ The current-generation scanner applies the current codec owner’s structural ad
+ 
+ Historical body preparation completes the parent catalog through [V3→V4](../session-format-v3-to-v4/README.md). It finds candidate direct children from headers, reads each child's own descriptor through historical codecs, and retains compact evidence plus source revisions. It neither prepares child catalogs nor publishes child successors. Unreadable or unsupported headers, including corrupt Zstandard header frames, are omitted from discovery and `list()`. Direct access to a corrupt compressed header still rejects; header I/O and cancellation errors propagate. Child decoding and descriptor-field failures produce warnings naming the child path and retain header identity through `subagent/catalog` when the parent has no complete entry; healthy children and existing parent catalog entries remain available. Opening a damaged child still reports that child's error. Missing, unsupported, or multiple descriptors likewise produce unknown-mode membership without inventing a label. Published unknown entries remain browsable; child history reads retry the actual log and resolve its mode from a valid descriptor. Preparation rechecks membership and inspected source revisions before returning, reuse, and publication, including failed child reads so a repaired child invalidates stale preparation. Source drift retries a read open once and refuses a write open. Cancellation still aborts the operation. Current V4 opens bypass discovery and validate catalog fields, uniqueness, and current delivery ownership before exposing events.
+ 
++Header scans retain validated headers only while their selected file revision is unchanged. Each scan re-enumerates directories and selects the highest generation; the cache compares device, inode, size, modification time, and change time, rechecks storage identity on a hit, and returns detached metadata. Changed, removed, malformed, or newly superseded files cannot reuse a previous header. This reduces repeated first-frame reads during historical child-membership validation; directory enumeration and revision checks remain proportional to the corpus.
++
+ Historical `stat` and `list` revisions require metadata work proportional to the root’s Session count. Fresh body preparation scans all selected headers and decodes direct-child bodies; memo reuse still scans membership and checks revisions. Read-only access never publishes an upgrade, so cold processes and evicted preparations repeat that work. Current V4 body reads and revisions avoid the historical corpus scan. See the [measured costs and diagnostic command](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.md#catalog-scan-measurements).
+ 
+ -----
+@@ -130,7 +132,10 @@ Read these pages when the package-level contract is not enough. They move from t
+ 
+ -----
+ 
++Session listing bounds concurrent directory, header, and metadata reads with `listConcurrency` (default 16, range 1–64). A list operation shares one generation discovery with its historical revision calculation. Header caches are checked against physical file revisions and retired paths are evicted. On failure or cancellation, the operation stops admitting reads and awaits already-started reads before rejecting; ordering and duplicate-id refusal remain unchanged.
++
+ <a id="model-experience"></a>
++
+ ## Model Experience
+ 
+ ### Resumed conversation history
+@@ -151,7 +156,6 @@ JSONL storage does not mutate live request prefixes. A resumed loop can reuse pr
+ 
+ <a id="known-limitations-and-deferred-work"></a>
+ 
+-
+ These limits define when this backend is a poor fit or needs special operational care. They are current package constraints, not a task backlog.
+ 
+ - **Format migration preserves the configured encoding and supports only the catalogued chain** — this build migrates supported historical generations to the current format; changing compression requires a separate root, and retained predecessors do not provide automatic fallback or downgrade support.
+diff --git a/packages/session/session-persistence-jsonl/README.zh.md b/packages/session/session-persistence-jsonl/README.zh.md
+index 3503b9bdb4..f1ace16f0b 100644
+--- a/packages/session/session-persistence-jsonl/README.zh.md
++++ b/packages/session/session-persistence-jsonl/README.zh.md
+@@ -83,6 +83,8 @@ kind: "package-reference"
+ 
+ 历史正文准备通过 [V3→V4](../session-format-v3-to-v4/README.zh.md) 补齐父目录：从 header 找到候选直属子 Session，通过历史编解码器逐个读取其自身 descriptor，保留紧凑证据与来源修订。此过程不准备子目录，也不发布子后继。不可读或不支持的 header（包括损坏的 Zstandard header 帧）不参与发现，也不出现在 `list()` 中。直接访问损坏的压缩 header 仍会失败；header 的 I/O 错误与取消错误继续传播。子日志解码或 descriptor 字段失败会产生带子路径的警告；父目录没有完整条目时，通过 `subagent/catalog` 保留 header 身份信息。健康子项和已有父目录项仍可使用。打开损坏子 Session 时仍报告该子会话的错误。缺失、不支持或多个 descriptor 同样生成模式未知的目录项，不编造标签。已发布的未知条目仍可浏览；读取子历史时会重试实际日志，并从有效 descriptor 确定模式。准备返回、复用与发布前会重新检查成员集合及已检查来源的修订，也包括读取失败的子日志，使修复后的子日志能够使旧准备缓存失效。来源变化时只读打开重试一次，写打开拒绝发布。取消仍会中止操作。当前 V4 打开跳过发现，并在暴露事件前校验目录字段、唯一性及当前投递归属。
+ 
++Header 扫描仅在所选文件修订不变时复用已验证的 header。每轮仍重新枚举目录、选择最高 generation；缓存比较设备、inode、大小、修改时间和变更时间，命中后仍复查存储身份，并返回独立的元数据对象。变更、删除、损坏或被新 generation 取代的文件不能复用旧 header。历史子成员校验因此减少重复首帧读取；目录枚举和修订检查仍与会话总数成正比。
++
+ 历史格式的 `stat` 与 `list` 修订号需要与根目录 Session 数量成正比的元数据工作。首次正文准备扫描所有所选 header 并解码直属子正文；复用准备缓存仍扫描成员集合并检查修订。只读访问从不发布升级，因此冷进程与被淘汰的准备缓存会重复这些工作。当前 V4 正文读取和修订号避开历史全库扫描。见[实测成本与诊断命令](../../../.agents/notes/implemented/architecture/2026-08-31-released-session-format-migrations.zh.md#catalog-scan-measurements)。
+ 
+ -----
+@@ -130,6 +132,8 @@ kind: "package-reference"
+ 
+ -----
+ 
++会话列表通过 `listConcurrency` 限制目录、header 与元数据读取的并发数，默认 16，范围 1–64。一次 list 的历史修订计算复用已发现的 generation；header 缓存依据实际文件修订校验，已消失路径的缓存会淘汰。失败或取消后停止发起新读取，等待已开始的读取结束后拒绝请求；条目顺序与重复身份拒绝保持一致。
++
+ <a id="model-experience"></a>
+ ## 模型体验
+ 
+@@ -151,7 +155,6 @@ JSONL 存储不修改实时请求前缀。只有重建历史、当前 envelope 
+ 
+ <a id="known-limitations-and-deferred-work"></a>
+ 
+-
+ 这些限制说明本后端何时不合适，或何时需要特别的运维注意。它们是当前包约束，不是任务积压。
+ 
+ - **格式迁移保留已配置编码，且只支持 catalog 中的链**——本 build 把受支持的历史代迁移到当前格式；更改压缩需要独立根，保留的旧版本不提供自动 fallback 或 downgrade 支持。
+diff --git a/packages/session/session-persistence-jsonl/src/index.ts b/packages/session/session-persistence-jsonl/src/index.ts
+index 1a89b76d29..d7ed40bd13 100644
+--- a/packages/session/session-persistence-jsonl/src/index.ts
++++ b/packages/session/session-persistence-jsonl/src/index.ts
+@@ -98,8 +98,12 @@ export interface Config {
+   root: string
+   /** Physical encoding; defaults to checksummed Zstandard frames. */
+   compression?: JsonlCompression
++  /** Maximum parallel directory, header, and metadata reads while listing Sessions. */
++  listConcurrency?: number
+ }
+ 
++type ResolvedConfig = Config & { listConcurrency: number }
++
+ /** One stored event graph whose producer has established immutable sharing. */
+ interface FrozenStoredEvents extends SessionHandleReadResult {
+   readonly eventState: 'shared-frozen'
+@@ -243,9 +247,10 @@ function waitWithAbort<T>(operation: Promise<T>, signal?: AbortSignal): Promise<
+  * flush, and never existed if the process crashes before that.
+  */
+ class JsonlSessionPersistence extends SessionPersistence {
+-  static Config: z<Config> = z.object({
++  static Config: z<Config, ResolvedConfig> = z.object({
+     root: z.string().required(),
+     compression: JsonlCompressionSchema,
++    listConcurrency: z.natural().min(1).max(64).default(16),
+   })
+ 
+   /** Backend label for diagnostics and effects; shadows `Service.name` without changing the service key. */
+@@ -253,6 +258,7 @@ class JsonlSessionPersistence extends SessionPersistence {
+ 
+   private root: string
+   private compression: JsonlCompression
++  private readonly listConcurrency: number
+   private rootEncodingCheck: Promise<void> | undefined
+   private readonly tracker = new JsonlBackendTracker(this.name)
+   private readonly generationFormat: Omit<JsonlGenerationFormatAdapter, 'createRestore'>
+@@ -266,6 +272,8 @@ class JsonlSessionPersistence extends SessionPersistence {
+   private readonly coldLogMemo = new Map<SessionId, StoredLog>()
+   /** One joinable decode/migration operation per selected historical Session file revision. */
+   private readonly migrationPreparations = new Map<SessionId, MigrationPreparation>()
++  /** Validated headers for selected physical file revisions; directory enumeration evicts retired paths. */
++  private readonly generationHeaders = new Map<string, { revision: PersistenceRevision; header: SessionHeader }>()
+ 
+   constructor(ctx: Context, public config: Config) {
+     super(ctx)
+@@ -278,6 +286,7 @@ class JsonlSessionPersistence extends SessionPersistence {
+     }
+     // Resolve once so later process.cwd() changes cannot split one backend across roots.
+     this.root = resolve(config.root)
++    this.listConcurrency = JsonlSessionPersistence.Config(config).listConcurrency
+     this.compression = config.compression ?? DEFAULT_COMPRESSION
+     this.generationFormat = {
+       currentVersion: sessionFormatCatalog.currentVersion,
+@@ -480,27 +489,30 @@ class JsonlSessionPersistence extends SessionPersistence {
+     // append lands mid-scan is then still in this snapshot (its artifact may
+     // predate the scan), so create-to-list visibility never has a hole.
+     const pending = [...this.tracker.pendingEntries()]
+-    const artifacts = await this.listArtifacts(signal)
++    let generations: readonly ResolvedJsonlGeneration[] | undefined
++    const artifacts = await this.listArtifacts(signal, selected => { generations = selected })
+     const corpusRevision = artifacts.some(artifact => artifact.sourceVersion < SESSION_FORMAT_VERSION)
+-      ? await this.historicalCorpusRevision(signal) : undefined
+-    for (const artifact of artifacts) {
++      ? await this.historicalCorpusRevision(signal, generations) : undefined
++    const stored = await this.mapListing(artifacts, async (artifact) => {
+       signal?.throwIfAborted()
+       try {
+         const identity = await stat(artifact.path, { bigint: true })
+         signal?.throwIfAborted()
+         listed.add(artifact.header.id)
+-        snapshots.push({
++        return {
+           header: artifact.header,
+           revision: artifact.sourceVersion < SESSION_FORMAT_VERSION
+             ? SessionPersistenceRevision(`${fileRevision(identity)}:${corpusRevision}`)
+             : fileRevision(identity),
+           sizeBytes: Number(identity.size),
+-        })
++        }
+       } catch (error: unknown) {
+         signal?.throwIfAborted()
+         if (!isENOENT(error)) throw error
++        return undefined
+       }
+-    }
++    }, signal)
++    for (const snapshot of stored) if (snapshot !== undefined) snapshots.push(snapshot)
+     for (const [id, entry] of pending) {
+       if (!listed.has(id)) snapshots.push({ header: entry.header, revision: entry.revision })
+     }
+@@ -1023,22 +1035,41 @@ class JsonlSessionPersistence extends SessionPersistence {
+ 
+   /** Enumerate selected physical generations without interpreting their headers or bodies. */
+   private async listGenerations(signal?: AbortSignal): Promise<ResolvedJsonlGeneration[]> {
+-    const sources: ResolvedJsonlGeneration[] = []
+-    for (const project of await this.listProjectDirs(signal)) {
+-      for (const dir of await this.listSessionDirs(project, signal)) {
+-        signal?.throwIfAborted()
+-        const selected = await this.resolveGenerationInDirectory(dir, signal)
+-        if (selected !== undefined) sources.push(selected)
++    const projects = await this.listProjectDirs(signal)
++    const directories = (await this.mapListing(projects, project => this.listSessionDirs(project, signal), signal)).flat()
++    const sources = await this.mapListing(directories, dir => this.resolveGenerationInDirectory(dir, signal), signal)
++    return sources.filter((source): source is ResolvedJsonlGeneration => source !== undefined)
++  }
++
++  private async mapListing<Value, Result>(
++    values: readonly Value[], read: (value: Value) => Promise<Result>, signal?: AbortSignal,
++  ): Promise<Result[]> {
++    const results = new Array<Result>(values.length)
++    let next = 0
++    let failure: { error: unknown } | undefined
++    const worker = async (): Promise<void> => {
++      try {
++        while (failure === undefined && next < values.length) {
++          signal?.throwIfAborted()
++          const index = next++
++          const value = values[index]
++          if (value !== undefined) results[index] = await read(value)
++        }
++      } catch (error: unknown) {
++        failure ??= { error }
+       }
+     }
+-    return sources
++    await Promise.all(Array.from({ length: Math.min(this.listConcurrency, values.length) }, worker))
++    if (failure !== undefined) throw failure.error
++    signal?.throwIfAborted()
++    return results
+   }
+ 
+   /** Historical logical events depend on the corpus, including members with unreadable headers. */
+-  private async historicalCorpusRevision(signal?: AbortSignal): Promise<string> {
+-    const paths = (await this.listGenerations(signal)).map(source => source.sourcePath).sort()
++  private async historicalCorpusRevision(signal?: AbortSignal, generations?: readonly ResolvedJsonlGeneration[]): Promise<string> {
++    const paths = (generations ?? await this.listGenerations(signal)).map(source => source.sourcePath).sort()
+     const hash = createHash('sha256')
+-    for (const path of paths) {
++    const revisions = await this.mapListing(paths, async (path) => {
+       signal?.throwIfAborted()
+       let revision: string
+       try {
+@@ -1047,37 +1078,50 @@ class JsonlSessionPersistence extends SessionPersistence {
+         if (!isENOENT(error)) throw error
+         revision = 'missing'
+       }
+-      hash.update(JSON.stringify([path, revision]))
+-    }
++      return JSON.stringify([path, revision])
++    }, signal)
++    for (const revision of revisions) hash.update(revision)
+     signal?.throwIfAborted()
+     return hash.digest('hex')
+   }
+ 
+   private async listArtifacts(
+     signal?: AbortSignal,
++    onDiscovery?: (generations: readonly ResolvedJsonlGeneration[]) => void,
+   ): Promise<Array<{ header: SessionHeader; path: string; sourceVersion: number }>> {
+     signal?.throwIfAborted()
+     await this.ensureRootEncoding()
+     signal?.throwIfAborted()
+     const artifacts: Array<{ header: SessionHeader; path: string; sourceVersion: number }> = []
+     const ids = new Set<SessionId>()
+-    for (const selected of await this.listGenerations(signal)) {
++    const generations = await this.listGenerations(signal)
++    onDiscovery?.(generations)
++    const paths = new Set(generations.map(selected => selected.sourcePath))
++    for (const path of this.generationHeaders.keys()) {
++      if (!paths.has(path)) this.generationHeaders.delete(path)
++    }
++    const headers = await this.mapListing(generations, async (selected) => {
+       signal?.throwIfAborted()
+       let header: SessionHeader | undefined
+       try {
+         header = await this.readGenerationHeader(selected, undefined, signal)
+       } catch (error: unknown) {
+-        if (error instanceof SessionFormatUnsupportedError || error instanceof SessionPersistenceCorruptionError) continue
++        if (error instanceof SessionFormatUnsupportedError || error instanceof SessionPersistenceCorruptionError) return undefined
+         throw error
+       }
+       if (header === undefined) {
+-        continue
++        return undefined
+       }
++      return { header, path: selected.sourcePath, sourceVersion: selected.sourceVersion }
++    }, signal)
++    for (const artifact of headers) {
++      if (artifact === undefined) continue
++      const { header } = artifact
+       if (ids.has(header.id)) {
+         throw new Error(`duplicate JSONL session id "${header.id}" appears in multiple project directories`)
+       }
+       ids.add(header.id)
+-      artifacts.push({ header, path: selected.sourcePath, sourceVersion: selected.sourceVersion })
++      artifacts.push(artifact)
+     }
+     signal?.throwIfAborted()
+     return artifacts
+@@ -1089,6 +1133,22 @@ class JsonlSessionPersistence extends SessionPersistence {
+     expectedId?: SessionId,
+     signal?: AbortSignal,
+   ): Promise<SessionHeader | undefined> {
++    let revision: PersistenceRevision
++    try {
++      revision = fileRevision(await stat(selected.sourcePath, { bigint: true }))
++    } catch (error: unknown) {
++      signal?.throwIfAborted()
++      if (!isENOENT(error)) throw error
++      this.generationHeaders.delete(selected.sourcePath)
++      return undefined
++    }
++    signal?.throwIfAborted()
++    const cached = this.generationHeaders.get(selected.sourcePath)
++    if (cached?.revision === revision) {
++      await this.assertStoredIdentity(selected.sourcePath, selected.sourceVersion, cached.header, expectedId, signal)
++      return { ...cached.header }
++    }
++    this.generationHeaders.delete(selected.sourcePath)
+     let first: string | undefined
+     try {
+       first = this.compression === 'zstd'
+@@ -1136,6 +1196,18 @@ class JsonlSessionPersistence extends SessionPersistence {
+       expectedId,
+       signal,
+     )
++    let after: PersistenceRevision
++    try {
++      after = fileRevision(await stat(selected.sourcePath, { bigint: true }))
++    } catch (error: unknown) {
++      signal?.throwIfAborted()
++      if (!isENOENT(error)) throw error
++      return undefined
++    }
++    signal?.throwIfAborted()
++    if (after === revision) {
++      this.generationHeaders.set(selected.sourcePath, { revision, header: { ...header } })
++    }
+     return header
+   }
+ 
+diff --git a/packages/session/session-persistence-jsonl/tests/jsonl.spec.ts b/packages/session/session-persistence-jsonl/tests/jsonl.spec.ts
+index 114b7f364e..3e2cefbf2b 100644
+--- a/packages/session/session-persistence-jsonl/tests/jsonl.spec.ts
++++ b/packages/session/session-persistence-jsonl/tests/jsonl.spec.ts
+@@ -2,6 +2,7 @@ import { MessageId, createMessage } from '@deepseek-ai/dsh-llm'
+ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+ import { Context } from '@deepseek-ai/cordis'
+ import { appendFile, mkdtemp, mkdir, rm, readFile, writeFile, readdir, stat, symlink } from 'node:fs/promises'
++import * as fileSystem from 'node:fs/promises'
+ import { tmpdir } from 'node:os'
+ import { dirname, join, relative, resolve } from 'node:path'
+ import { scheduler } from 'node:timers/promises'
+@@ -743,6 +744,38 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
+     }
+   })
+ 
++  it('reuses unchanged generation headers and rereads changed or malformed files', async () => {
++    const header = meta('cached-generation-header', '/work')
++    const path = rawLogPath(root, header.cwd, header.id)
++    await mkdir(dirname(path), { recursive: true })
++    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
++    const opened = vi.spyOn(fileSystem, 'open')
++    const opens = () => opened.mock.calls.filter(args => String(args[0]) === path).length
++    const [first] = await ctx.sessionPersistence.list()
++    expect(first?.header.createdAt).toBe(header.createdAt)
++    const initialReads = opens()
++    expect(initialReads).toBeGreaterThan(0)
++    mutableHeader(first!.header).createdAt += 100
++    expect((await ctx.sessionPersistence.list())[0]?.header.createdAt).toBe(header.createdAt)
++    expect(opens()).toBe(initialReads)
++    await rewriteHeader(path, value => { value.createdAt = header.createdAt + 1 })
++    expect((await ctx.sessionPersistence.list())[0]?.header.createdAt).toBe(header.createdAt + 1)
++    expect(opens()).toBeGreaterThan(initialReads)
++    await writeFile(path, 'malformed header\n')
++    expect(await ctx.sessionPersistence.list()).toEqual([])
++  })
++
++  it('selects a future successor instead of a cached readable generation', async () => {
++    const header = meta('cached-header-future-successor', '/work')
++    const path = rawLogPath(root, header.cwd, header.id)
++    await mkdir(dirname(path), { recursive: true })
++    await writeFile(path, `${JSON.stringify(toHeaderLine(header))}\n`)
++    expect((await ctx.sessionPersistence.list())[0]?.header.id).toBe(header.id)
++    const futurePath = generationLogPath(root, header.cwd, header.id, SESSION_FORMAT_VERSION + 1, 'none')
++    await writeFile(futurePath, `${JSON.stringify({ type: 'session', version: SESSION_FORMAT_VERSION + 1, id: header.id })}\n`)
++    expect(await ctx.sessionPersistence.list()).toEqual([])
++  })
++
+   it('projects a released v0 header through stat and list without reading or mutating its body', async () => {
+     const header = meta('released-v0-metadata', '/work')
+     const sourcePath = historicalLogPath(root, header.cwd, header.id)
+@@ -2044,7 +2077,7 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
+     queueMicrotask(() => { controller.abort(reason) })
+ 
+     await expect(pending).rejects.toBe(reason)
+-    expect(discovery).toHaveBeenCalledWith(controller.signal)
++    expect(discovery.mock.calls[0]?.[0]).toBe(controller.signal)
+   })
+ })
+ 

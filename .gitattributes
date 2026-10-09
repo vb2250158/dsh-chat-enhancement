@@ -3,3 +3,5 @@
 # fail on the very machines this file is meant to serve.
 patches/*.patch -text
 patches/2026-10-08-workspace-sticky-headers.patch whitespace=-blank-at-eol
+patches/2026-10-09-session-list-loading.patch whitespace=-blank-at-eol
+host-patches/*.patch -text
