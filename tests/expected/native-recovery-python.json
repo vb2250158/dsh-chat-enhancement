@@ -1,0 +1,39 @@
+{
+  "root_id": "native-recovery-root",
+  "child_id": "native-recovery-child",
+  "native_start_accepted": true,
+  "duplicate_accepted": false,
+  "child_start_accepted": true,
+  "root_user_texts": [
+    "Finish the original root task"
+  ],
+  "root_finish_reasons": [
+    "interrupted",
+    "completed",
+    "completed"
+  ],
+  "child_user_texts": [
+    "Finish the original child task"
+  ],
+  "child_finish_reasons": [
+    "interrupted",
+    "completed"
+  ],
+  "notification_event_types": [
+    "turn/start",
+    "step/start",
+    "assistant/message",
+    "step/end",
+    "turn/end",
+    "turn/start",
+    "step/start",
+    "assistant/message",
+    "step/end",
+    "turn/end",
+    "turn/start",
+    "step/start",
+    "assistant/message",
+    "step/end",
+    "turn/end"
+  ]
+}

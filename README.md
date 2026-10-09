@@ -1,5 +1,13 @@
 # DSH Chat Enhancement
 
+## 0.3.71：恢复能力与重试分类
+
+主会话和子会话通过配套宿主接口续跑原轮次，保留身份、模型、队列和父子关系，不添加恢复消息。临时错误只重试失败项；宿主接口缺失时提示“需更新并重启”，停用无效重试和后台轮询，悬停可查看成功数量及每项错误。
+
+在当前 Harness 根目录应用 `host-patches/prompt-free-recovery.patch`，重建 agent、agent-loop、subagent 包并重启 Host。更新 Harness 后应重新检查配套接口；该补丁按当前源码适配，不可直接覆盖不匹配的版本。
+
+设置 `DSH_SOURCE_ROOT` 指向已构建的 Harness，运行 `node --test tests/session-recovery-profile.test.mjs` 可用正式 SDK profile 验证恢复、原输入、父子关系与持久化回读。两种 SDK 共用宿主场景，预期输出分别保存；Python 场景在 Windows 运行，需要 Python 与 pydantic。
+
 ## 0.3.69：聊天列表分批加载
 
 配套源码补丁先显示各工作区最近会话，旧会话随后按活动时间分批补齐；JSONL 目录扫描使用限量并行与 header 缓存。加载期间可打开已显示的会话，实时更新和删除不会被后续页覆盖。应用、重建和验收步骤见 [聊天列表加载](docs/session-list-loading.md)。

@@ -3,8 +3,8 @@ import React from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 
 export const recoveryLocales = {
-  zh: { listing: '读取会话列表', scanning: '检查中断记录', validating: '核验会话状态', attaching: '挂载原会话', resuming: '启动原会话', waiting: '等待响应', seconds: '秒', question: '是否恢复意外中断会话', recover: '恢复中断会话', dismiss: '忽略本次恢复提示', busy: '正在恢复中断会话', failed: '恢复未完成，点击重试', checkFailed: '中断会话检查失败，点击重试' },
-  en: { listing: 'Listing sessions', scanning: 'Checking interruptions', validating: 'Validating session', attaching: 'Loading original session', resuming: 'Resuming session', waiting: 'Waiting for response', seconds: 's', question: 'Restore interrupted sessions?', recover: 'Restore interrupted sessions', dismiss: 'Dismiss this recovery prompt', busy: 'Restoring interrupted sessions', failed: 'Recovery incomplete; retry', checkFailed: 'Session check failed; retry' },
+  zh: { listing: '读取会话列表', scanning: '检查中断记录', validating: '核验会话状态', attaching: '挂载原会话', resuming: '启动原会话', waiting: '等待响应', seconds: '秒', question: '是否恢复意外中断会话', recover: '恢复中断会话', dismiss: '忽略本次恢复提示', busy: '正在恢复中断会话', failed: '恢复未完成，点击重试', checkFailed: '中断会话检查失败，点击重试', upgrade: '宿主缺少恢复能力，需更新并重启', restored: '已恢复', remaining: '待恢复' },
+  en: { listing: 'Listing sessions', scanning: 'Checking interruptions', validating: 'Validating session', attaching: 'Loading original session', resuming: 'Resuming session', waiting: 'Waiting for response', seconds: 's', question: 'Restore interrupted sessions?', recover: 'Restore interrupted sessions', dismiss: 'Dismiss this recovery prompt', busy: 'Restoring interrupted sessions', failed: 'Recovery incomplete; retry', checkFailed: 'Session check failed; retry', upgrade: 'Host recovery unavailable; update and restart', restored: 'Restored', remaining: 'Remaining' },
 }
 
 export const recoveryCss = `.dsh-session-recovery{position:relative;display:flex;align-items:center;gap:2px;min-width:0;width:100%;color:var(--dsw-alias-label-secondary);font-size:12px;white-space:nowrap}.dsh-session-recovery-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}.dsh-session-recovery button{flex-shrink:0}.dsh-session-recovery-progress{position:absolute;inset:auto 0 0;height:2px;overflow:hidden;background:var(--dsw-alias-label-secondary);opacity:.7}.dsh-session-recovery-progress-fill{display:block;height:100%;background:var(--dsw-alias-label-primary);transition:width .25s ease}.dsh-session-recovery-progress[data-indeterminate] .dsh-session-recovery-progress-fill{width:30%;animation:dsh-recovery-progress 1.2s ease-in-out infinite}@keyframes dsh-recovery-progress{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@media(prefers-reduced-motion:reduce){.dsh-session-recovery-progress-fill{transition:none}.dsh-session-recovery-progress[data-indeterminate] .dsh-session-recovery-progress-fill{animation:none;transform:translateX(110%)}}`
@@ -15,6 +15,7 @@ const recoveryRequestSchema = { parse(value) {
 } }
 const recoveryResultSchema = { parse(value) {
   if (!value || typeof value.batchId !== 'string' || !['idle', 'checking', 'ready', 'recovering', 'done', 'failed', 'dismissed'].includes(value.phase) || !['count', 'scanErrors', 'restored', 'pollIntervalMs'].every(key => Number.isSafeInteger(value[key]) && value[key] >= 0) || value.pollIntervalMs === 0) throw new TypeError('Invalid recovery result')
+  if ((value.retryable !== undefined && typeof value.retryable !== 'boolean') || (value.blockedCount !== undefined && (!Number.isSafeInteger(value.blockedCount) || value.blockedCount < 0))) throw new TypeError('Invalid recovery retry state')
   if (!['idle', 'listing', 'scanning', 'validating', 'attaching', 'resuming'].includes(value.stage) || !['completed', 'total', 'stageStartedAt', 'requestTimeoutMs'].every(key => Number.isSafeInteger(value[key]) && value[key] >= 0) || value.requestTimeoutMs === 0 || typeof value.currentSessionId !== 'string') throw new TypeError('Invalid recovery progress')
   return value
 } }
@@ -64,7 +65,7 @@ export function SessionRecoveryPrompt({ wide, readRecovery, t, requestTimeoutMs 
         requestLimit = next.requestTimeoutMs ?? requestTimeoutMs
         setState(next)
         setError(false)
-        if (!['done', 'dismissed'].includes(next.phase)) timer = setTimeout(() => request(), next.pollIntervalMs)
+        if (!['done', 'dismissed'].includes(next.phase) && !(next.phase === 'failed' && next.retryable === false)) timer = setTimeout(() => request(), next.pollIntervalMs)
       } catch {
         // 连接或服务失败留在原行，由用户重试，避免后台无界重试。
         if (active) setError(true)
@@ -90,10 +91,14 @@ export function SessionRecoveryPrompt({ wide, readRecovery, t, requestTimeoutMs 
   const elapsed = Math.max(0, Math.floor((now - (state?.stageStartedAt ?? now)) / 1000))
   const activity = pending ? t('waiting') : state?.stage && state.stage !== 'idle' ? t(state.stage) : t('busy')
   const detail = `${activity}${total ? ` ${completed}/${total}` : ''} · ${elapsed}${t('seconds')}`
-  const label = error ? t('checkFailed') : state.phase === 'failed' ? `${t('failed')} (${state.scanErrors + state.count})` : busy ? detail : t('question')
+  const blocked = !error && state?.phase === 'failed' && state.retryable === false
+  const failure = blocked ? `${t('upgrade')} (${state.blockedCount ?? state.count})` : `${t('failed')} (${state?.scanErrors + state?.count})`
+  const label = error ? t('checkFailed') : state.phase === 'failed' ? failure : busy ? detail : t('question')
+  const issues = state?.issues?.map(issue => `${issue.sessionId}: ${issue.message}`) ?? []
+  const outcome = state?.phase === 'failed' ? `${t('restored')} ${state.restored} · ${t('remaining')} ${state.count + state.scanErrors}` : ''
   return React.createElement('div', { className: 'dsh-session-recovery', role: 'status', 'aria-busy': busy },
-    React.createElement('span', { className: 'dsh-session-recovery-label', title: [label, state?.currentSessionId, state?.issues?.[0]?.message].filter(Boolean).join('\n') }, label),
-    React.createElement(Button, { variant: 'ghost', size: 'sm', disabled: busy, 'aria-label': t('recover'), title: t('recover'), onClick: () => operation.current?.(error ? 'check' : 'recover', state?.batchId) }, '✓'),
+    React.createElement('span', { className: 'dsh-session-recovery-label', title: [label, outcome, state?.currentSessionId, ...issues].filter(Boolean).join('\n') }, label),
+    React.createElement(Button, { variant: 'ghost', size: 'sm', disabled: busy || blocked, 'aria-label': t('recover'), title: blocked ? t('upgrade') : t('recover'), onClick: () => operation.current?.(error ? 'check' : 'recover', state?.batchId) }, '✓'),
     React.createElement(Button, { variant: 'ghost', size: 'sm', disabled: busy, 'aria-label': t('dismiss'), title: t('dismiss'), onClick: () => {
       if (state) void operation.current?.('dismiss', state.batchId)
       else { setError(false); setState({ phase: 'dismissed' }) }

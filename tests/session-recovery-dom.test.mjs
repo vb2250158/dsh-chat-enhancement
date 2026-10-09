@@ -65,6 +65,19 @@ test('发布产物用真实按钮呈现单行恢复提示，确认去重、失�
     assert.equal(document.querySelector('.dsh-session-recovery'), null)
     assert.match(document.querySelector('style').textContent, /white-space:nowrap/u)
     assert.match(document.querySelector('style').textContent, /var\(--dsw-alias-label-secondary\)/u)
+    await React.act(async () => root.render(React.createElement(row.component, { key: 'blocked', wide: true, readRecovery, t })))
+    await React.act(async () => reply({ ...ready, phase: 'failed', count: 3, restored: 1, blockedCount: 3, retryable: false, issues: [
+      { sessionId: 'root', message: 'Host upgrade required: prompt-free continuation unavailable' },
+      { sessionId: 'child', message: 'Host upgrade required: prompt-free subagent continuation unavailable' },
+    ] }))
+    assert.equal(document.querySelector('.dsh-session-recovery-label').textContent, '宿主缺少恢复能力，需更新并重启 (3)')
+    assert.equal(document.querySelector('#app button').disabled, true)
+    assert.match(document.querySelector('.dsh-session-recovery-label').title, /已恢复 1 · 待恢复 3/)
+    assert.match(document.querySelector('.dsh-session-recovery-label').title, /root:.*\nchild:/)
+    const requestsBefore = requests.length
+    await React.act(async () => document.querySelector('#app button').click())
+    assert.equal(requests.length, requestsBefore)
+    assert.equal(document.querySelectorAll('#app button')[1].disabled, false)
     // 实际产物展示扫描阶段、数量和当前会话；失联请求解除按钮禁用。
     await React.act(async () => root.render(React.createElement(row.component, { key: 'timeout', wide: true, readRecovery, t, requestTimeoutMs: 40 })))
     await React.act(async () => reply({ ...ready, phase: 'checking', stage: 'scanning', completed: 2, total: 8, currentSessionId: 'original-session', stageStartedAt: Date.now() - 2000, pollIntervalMs: 5 }))

@@ -2,6 +2,16 @@
 import { randomUUID } from 'node:crypto'
 import { setImmediate as yieldToHost } from 'node:timers/promises'
 
+/** 缺失宿主能力必须更新并重启，重试同一实例无法修复。 */
+class RecoveryCapabilityError extends Error {
+  constructor(message) { super(message); this.code = 'HOST_CAPABILITY_MISSING' }
+}
+
+/** 将重试分类随共享批次返回，界面不解析错误文本。 */
+function recoveryIssue(sessionId, stage, error) {
+  return { sessionId, stage, message: String(error.message ?? error).split('\n')[0].slice(0, 300), retryable: error.code !== 'HOST_CAPABILITY_MISSING', ...(error.code === 'HOST_CAPABILITY_MISSING' ? { code: error.code } : {}) }
+}
+
 /** 解析可由 cordis.yml 调整的检查范围、轮询间隔和读取超时。 */
 export function recoveryConfig(config = {}) {
   const values = { recoveryLookbackMs: 86400000, recoveryPollIntervalMs: 1500, recoveryReadTimeoutMs: 30000, recoveryScanConcurrency: 4 }
@@ -87,12 +97,19 @@ export class SessionRecovery {
   }
 
   snapshot() {
-    return { batchId: this.batchId, phase: this.phase, count: this.candidates.size, scanErrors: this.scanErrors, restored: this.restored, pollIntervalMs: this.config.recoveryPollIntervalMs, stage: this.stage, completed: this.completed, total: this.total, stageStartedAt: this.stageStartedAt, currentSessionId: this.currentSessionId, requestTimeoutMs: this.config.recoveryReadTimeoutMs, issues: [...this.issues.values()] }
+    const blockedCount = [...this.candidates.keys()].filter(id => this.issues.get(id)?.retryable === false).length
+    return { batchId: this.batchId, phase: this.phase, count: this.candidates.size, scanErrors: this.scanErrors, restored: this.restored, blockedCount, retryable: this.scanErrors > 0 || this.candidates.size > blockedCount, pollIntervalMs: this.config.recoveryPollIntervalMs, stage: this.stage, completed: this.completed, total: this.total, stageStartedAt: this.stageStartedAt, currentSessionId: this.currentSessionId, requestTimeoutMs: this.config.recoveryReadTimeoutMs, issues: [...this.issues.values()] }
   }
 
   read(request) {
     this.abort.signal.throwIfAborted()
     if (request.action === 'check') {
+      if (!this.active && this.phase === 'failed') {
+        for (const id of this.candidates.keys()) {
+          if (this.busy(id)) { this.candidates.delete(id); this.issues.delete(id) }
+        }
+        if (!this.candidates.size && !this.scanErrors) this.phase = 'done'
+      }
       if (this.phase === 'idle') this.launch('checking', () => this.scan())
     } else {
       if (request.batchId !== this.batchId) throw new Error('Recovery batch expired; check again.')
@@ -104,7 +121,7 @@ export class SessionRecovery {
         this.launch('recovering', () => this.recover())
       }
       if (request.action === 'dismiss' && !this.active) this.phase = 'dismissed'
-      else if (request.action === 'recover' && !this.active && ['ready', 'failed'].includes(this.phase)) {
+      else if (request.action === 'recover' && !this.active && ['ready', 'failed'].includes(this.phase) && this.snapshot().retryable) {
         this.launch('recovering', async () => {
           if (this.scanErrors) await this.scan()
           await this.recover()
@@ -122,7 +139,7 @@ export class SessionRecovery {
       if (!this.abort.signal.aborted) {
         this.phase = 'failed'
         this.scanErrors += 1
-        this.issues.set('', { sessionId: this.currentSessionId, stage: phase === 'checking' ? 'check' : 'recover', message: String(error.message ?? error).split('\n')[0].slice(0, 300) })
+        this.issues.set('', recoveryIssue(this.currentSessionId, phase === 'checking' ? 'check' : 'recover', error))
       }
     }).finally(() => { this.active = false })
   }
@@ -273,9 +290,10 @@ export class SessionRecovery {
     let started = false
     if (candidate.parentId) {
       const parent = this.ctx.agents.get(candidate.parentId)
-      if (!this.ctx.subagents.continueInterrupted) throw new Error('Host upgrade required: prompt-free subagent continuation unavailable')
+      if (!this.ctx.subagents.continueInterrupted) throw new RecoveryCapabilityError('Host upgrade required: prompt-free subagent continuation unavailable')
       this.setStage('resuming', candidate.id)
       started = await this.waitFor(`resume:${candidate.id}:${candidate.startSeq}`, () => this.ctx.subagents.continueInterrupted(parent, candidate.id, candidate.startSeq, signal))
+      if (!started) throw new Error('Original child continuation was not accepted; retry after current work settles')
     } else {
       this.setStage('attaching', candidate.id)
       const result = await this.waitFor(`attach:${candidate.id}`, () => this.ctx.sessionController.resolveAgent(candidate.id))
@@ -285,15 +303,16 @@ export class SessionRecovery {
       this.setStage('resuming', candidate.id)
       if (candidate.kind === 'quota') {
         if (this.ctx.goals?.get(result.agent)) throw new Error('Use the existing goal continuation for goal sessions')
-        if (!result.agent.continueQuotaFailure) throw new Error('Host upgrade required: prompt-free quota continuation unavailable')
+        if (!result.agent.continueQuotaFailure) throw new RecoveryCapabilityError('Host upgrade required: prompt-free quota continuation unavailable')
         started = result.agent.continueQuotaFailure(candidate.startSeq)
         if (!started) throw new Error('Quota continuation rejected: the original turn is no longer eligible')
       } else {
         const goalResult = resumeInterruptedGoal(this.ctx.goals, result.agent)
         if (goalResult === 'resumed') started = true
         else if (goalResult === 'absent') {
-          if (!result.agent.continueInterrupted) throw new Error('Host upgrade required: prompt-free continuation unavailable')
+          if (!result.agent.continueInterrupted) throw new RecoveryCapabilityError('Host upgrade required: prompt-free continuation unavailable')
           started = result.agent.continueInterrupted(candidate.startSeq)
+          if (!started) throw new Error('Original turn continuation was not accepted; retry after current work settles')
         }
       }
     }
@@ -308,14 +327,16 @@ export class SessionRecovery {
     this.completed = 0
     for (const candidate of candidates) {
       if (!this.candidates.has(candidate.id)) { this.completed += 1; continue }
+      if (this.issues.get(candidate.id)?.retryable === false) { this.completed += 1; continue }
       try {
+        if (candidate.parentId && !this.ctx.subagents.continueInterrupted) throw new RecoveryCapabilityError('Host upgrade required: prompt-free subagent continuation unavailable')
         if (candidate.parentId) await this.ensureParent(candidate.parentId)
         await this.resume(candidate)
         this.issues.delete(candidate.id)
       } catch (error) {
         // 单个恢复失败保留原轮次身份，重试前会再次检查最新轮次和队列。
         this.abort.signal.throwIfAborted()
-        this.issues.set(candidate.id, { sessionId: candidate.id, stage: 'recover', message: String(error.message ?? error).split('\n')[0].slice(0, 300) })
+        this.issues.set(candidate.id, recoveryIssue(candidate.id, 'recover', error))
       }
       this.completed += 1
       await yieldToHost(undefined, { signal: this.abort.signal })

@@ -44,6 +44,76 @@ test('候选只含重启前一小时的最后中断轮，排除手动取消、�
   assert.throws(() => recoveryConfig({ recoveryLookbackMs: 0 }))
 })
 
+test('缺失宿主能力保留三项原身份并停止无效重试', async () => {
+  const f = fixture([observation('root'), observation('child-a', { parentId: 'root' }), observation('child-b', { parentId: 'root' })])
+  f.ctx.subagents = {}
+  f.ctx.sessionController.resolveAgent = async id => ({ agent: { id, status: 'idle' } })
+  f.recovery.startAutomatic()
+  await f.recovery.work
+  const state = f.recovery.snapshot()
+  assert.equal(state.phase, 'failed')
+  assert.equal(state.count, 3)
+  assert.equal(state.blockedCount, 3)
+  assert.equal(state.retryable, false)
+  assert.equal(state.scanErrors, 0)
+  assert.deepEqual(state.issues.map(issue => issue.sessionId).sort(), ['child-a', 'child-b', 'root'])
+  assert.ok(state.issues.every(issue => issue.code === 'HOST_CAPABILITY_MISSING' && issue.retryable === false))
+  const reads = f.reads()
+  f.recovery.read({ action: 'recover', batchId: state.batchId })
+  await f.recovery.work
+  assert.equal(f.reads(), reads)
+  assert.equal(f.prompts.length, 0)
+  await f.recovery.dispose()
+})
+
+test('混合失败只重试临时错误，保留缺失宿主能力的原子会话', async () => {
+  const f = fixture([observation('root'), observation('child', { parentId: 'root' })])
+  f.ctx.subagents = {}
+  f.fail(true)
+  f.recovery.startAutomatic()
+  await f.recovery.work
+  assert.equal(f.recovery.snapshot().blockedCount, 1)
+  assert.equal(f.recovery.snapshot().retryable, true)
+  f.fail(false)
+  f.recovery.read({ action: 'recover', batchId: f.recovery.batchId })
+  await f.recovery.work
+  assert.equal(f.recovery.snapshot().restored, 1)
+  assert.equal(f.recovery.snapshot().count, 1)
+  assert.equal(f.recovery.snapshot().retryable, false)
+  assert.equal(f.recovery.snapshot().issues[0].sessionId, 'child')
+  await f.recovery.dispose()
+})
+
+test('原驱动临时拒绝启动时保留候选，后续重试仍使用同一轮次', async () => {
+  const f = fixture()
+  let starts = 0
+  f.ctx.sessionController.resolveAgent = async id => ({ agent: { id, status: 'idle', continueInterrupted(seq) { assert.equal(seq, 0); return ++starts > 1 } } })
+  f.recovery.startAutomatic()
+  await f.recovery.work
+  assert.equal(f.recovery.snapshot().count, 1)
+  assert.equal(f.recovery.snapshot().retryable, true)
+  f.recovery.read({ action: 'recover', batchId: f.recovery.batchId })
+  await f.recovery.work
+  assert.equal(f.recovery.snapshot().phase, 'done')
+  assert.equal(f.recovery.snapshot().restored, 1)
+  await f.recovery.dispose()
+})
+
+test('用户已在原会话继续运行时，查询移除过期的恢复失败提示', async () => {
+  const f = fixture()
+  f.fail(true)
+  f.recovery.startAutomatic()
+  await f.recovery.work
+  assert.equal(f.recovery.snapshot().phase, 'failed')
+  f.agents.set('root', { status: 'running' })
+  const state = f.recovery.read({ action: 'check' })
+  assert.equal(state.phase, 'done')
+  assert.equal(state.count, 0)
+  assert.deepEqual(state.issues, [])
+  assert.equal(f.prompts.length, 1)
+  await f.recovery.dispose()
+})
+
 test('默认只读最近 24 小时的日志，保留最近续用的旧会话和截止边界', async () => {
   assert.equal(recoveryConfig().recoveryLookbackMs, 86400000)
   const old = observation('old', { time: bootAt - 86400001 })
@@ -217,10 +287,11 @@ test('不响应的列表读取在期限内失败，批次可以重试', async ()
 test('挂载卡住显示当前身份和进度，超时重试复用未完成调用', async () => {
   const f = fixture(); f.recovery.config.recoveryReadTimeoutMs = 20
   let release, calls = 0
+  const entered = Promise.withResolvers()
   const original = f.ctx.sessionController.resolveAgent
-  f.ctx.sessionController.resolveAgent = id => { calls++; return new Promise(resolve => { release = async () => resolve(await original(id)) }) }
+  f.ctx.sessionController.resolveAgent = id => { calls++; entered.resolve(); return new Promise(resolve => { release = async () => resolve(await original(id)) }) }
   f.recovery.startAutomatic()
-  await new Promise(resolve => setTimeout(resolve, 8))
+  await entered.promise
   const snapshot = f.recovery.snapshot()
   assert.equal(snapshot.stage, 'attaching'); assert.equal(snapshot.currentSessionId, 'root')
   assert.equal(snapshot.total, 1); assert.equal(snapshot.completed, 0)

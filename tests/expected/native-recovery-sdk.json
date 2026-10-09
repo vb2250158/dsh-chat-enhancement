@@ -1,0 +1,71 @@
+{
+  "accepted": true,
+  "duplicate": false,
+  "child": true,
+  "requests": [
+    [
+      "Finish the original root task"
+    ],
+    [
+      "Finish the original child task"
+    ],
+    [
+      "Finish the original root task"
+    ]
+  ],
+  "root": [
+    {
+      "type": "user/message",
+      "source": "user",
+      "text": "Finish the original root task"
+    },
+    {
+      "type": "turn/end",
+      "turn": 1,
+      "reason": "interrupted"
+    },
+    {
+      "type": "assistant/message",
+      "text": "ROOT_CONTINUED"
+    },
+    {
+      "type": "turn/end",
+      "turn": 2,
+      "reason": "completed"
+    },
+    {
+      "type": "assistant/message",
+      "text": "CHILD_RESULT_RECEIVED"
+    },
+    {
+      "type": "turn/end",
+      "turn": 3,
+      "reason": "completed"
+    }
+  ],
+  "childTurns": [
+    "interrupted",
+    "completed"
+  ],
+  "childUserTexts": [
+    "Finish the original child task"
+  ],
+  "descriptors": 1,
+  "sdkEventTypes": [
+    "turn/start",
+    "step/start",
+    "assistant/message",
+    "step/end",
+    "turn/end",
+    "turn/start",
+    "step/start",
+    "assistant/message",
+    "step/end",
+    "turn/end",
+    "turn/start",
+    "step/start",
+    "assistant/message",
+    "step/end",
+    "turn/end"
+  ]
+}
