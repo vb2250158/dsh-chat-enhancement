@@ -1,0 +1,458 @@
+diff --git a/packages/session/session-stats/src/projection.ts b/packages/session/session-stats/src/projection.ts
+--- a/packages/session/session-stats/src/projection.ts
++++ b/packages/session/session-stats/src/projection.ts
+@@ -1,6 +1,6 @@
+ /**
+  * The `sessionStats` projection unit: a pure fold of step boundaries, stream
+- * embedded streams, tool pairs, and assembled assistant messages into whole-log counts
++ * embedded streams, tool and compaction pairs, and assembled messages into whole-log counts
+  * and wall times.
+  *
+  * `step/end` — not `assistant/message` — is the counted step event because it
+@@ -12,7 +12,7 @@
+  *
+  * The wall-time folds mirror the client window fold field by field
+  * (`deriveStats` in dsh-client-ui-conversation, that fold's whole-window
+- * fallback role): model time is `step/start` → `assistant/message`, first
++ * fallback role): model time is `step/start` → `assistant/message` excluding compaction, first
+  * token is the first non-empty delta chunk and survives an in-step
+  * `llm/retry`, decode spans first token → assembled message on steps that
+  * also report output tokens, and tool time pairs `tool/call` → `tool/result`
+@@ -25,6 +25,7 @@
+ 
+ import { z } from 'zod'
+ import { assistantStreamFirstTokenTime } from '@deepseek-ai/dsh-llm'
++import type {} from '@deepseek-ai/dsh-compaction/types'
+ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+ 
+ 
+@@ -38,6 +39,8 @@
+   llmMs: number
+   /** Summed matched tool call→result wall time, ms. */
+   toolMs: number
++  /** Completed compaction attempts, including failed attempts, ms. */
++  compactionMs: number
+   /** Summed first-token latency over `ttftSteps`, ms. */
+   ttftMs: number
+   /** Steps carrying a recorded first token. */
+@@ -58,9 +61,11 @@
+   /** Turn of the last counted `step/end`; null before the first. */
+   lastTurn: number | null
+   /** The open step's boundary facts; null outside a step or after its message assembled. */
+-  openStep: { turn: number; step: number; startTime: number; firstTokenTime: number | null } | null
++  openStep: { turn: number; step: number; startTime: number; firstTokenTime: number | null; compactionSpans: { startTime: number; endTime: number }[] } | null
+   /** Dispatch times of tool calls whose result has not landed, by callId. */
+   pendingCalls: Record<string, number>
++  /** Start times of compaction attempts awaiting their matching end. */
++  pendingCompactions: Record<string, number>
+ }
+ 
+ declare module '@deepseek-ai/dsh-session-projection/types' {
+@@ -74,6 +79,7 @@
+   steps: z.number().int().nonnegative(),
+   llmMs: z.number().nonnegative(),
+   toolMs: z.number().nonnegative(),
++  compactionMs: z.number().nonnegative().default(0),
+   ttftMs: z.number().nonnegative(),
+   ttftSteps: z.number().int().nonnegative(),
+   decodeMs: z.number().nonnegative(),
+@@ -87,15 +93,24 @@
+  * `sessionStatsSchema` (the wire output boundary) with the boundary fields.
+  */
+ const sessionStatsStateSchema = sessionStatsSchema.extend({
++  compactionMs: z.number().nonnegative(),
+   lastTurn: z.number().int().nonnegative().nullable(),
+   openStep: z.object({
+     turn: z.number().int().nonnegative(),
+     step: z.number().int().nonnegative(),
+     startTime: z.number().nonnegative(),
+     firstTokenTime: z.number().nonnegative().nullable(),
++    compactionSpans: z.array(z.object({ startTime: z.number().nonnegative(), endTime: z.number().nonnegative() })),
+   }).nullable(),
+   pendingCalls: z.record(z.string(), z.number().nonnegative()),
++  pendingCompactions: z.record(z.string(), z.number().nonnegative()),
+ })
++
++/** Model interval excluding disjoint, session-serialized compaction attempts. */
++function modelElapsed(start: number, end: number, spans: readonly { startTime: number; endTime: number }[]): number {
++  const excluded = spans.reduce((sum, span) => sum + Math.max(0, Math.min(end, span.endTime) - Math.max(start, span.startTime)), 0)
++  return Math.max(0, end - start - excluded)
++}
+ 
+ /**
+  * Provider-reported completion tokens, guarded the way the window fold guards
+@@ -112,13 +127,14 @@
+ /** The `sessionStats` unit registered on `ctx.sessionProjections` (exported for the unit spec). */
+ export const sessionStatsProjectionDefinition = {
+   key: 'sessionStats',
+-  stateVersion: 1,
++  stateVersion: 2,
+   stateSchema: sessionStatsStateSchema,
+   init: () => ({
+     turns: 0,
+     steps: 0,
+     llmMs: 0,
+     toolMs: 0,
++    compactionMs: 0,
+     ttftMs: 0,
+     ttftSteps: 0,
+     decodeMs: 0,
+@@ -126,6 +142,7 @@
+     lastTurn: null,
+     openStep: null,
+     pendingCalls: {},
++    pendingCompactions: {},
+   }),
+   apply: (state, event) => {
+     // Every uninteresting event returns the same reference (Object.is gates the change feed).
+@@ -133,8 +150,22 @@
+       case 'step/start':
+         return {
+           ...state,
+-          openStep: { turn: event.data.turn, step: event.data.step, startTime: event.time, firstTokenTime: null },
+-        }
++          openStep: { turn: event.data.turn, step: event.data.step, startTime: event.time, firstTokenTime: null, compactionSpans: [] },
++        }
++      case 'compaction/start':
++        return { ...state, pendingCompactions: { ...state.pendingCompactions, [event.data.compactionId]: event.time } }
++      case 'compaction/end': {
++        const id = event.data.compactionId
++        const start = Object.hasOwn(state.pendingCompactions, id) ? state.pendingCompactions[id] : undefined
++        if (start === undefined) return state
++        return {
++          ...state,
++          compactionMs: state.compactionMs + Math.max(0, event.time - start),
++          pendingCompactions: Object.fromEntries(Object.entries(state.pendingCompactions).filter(([key]) => key !== id)),
++          openStep: state.openStep === null ? null : { ...state.openStep,
++            compactionSpans: [...state.openStep.compactionSpans, { startTime: start, endTime: event.time }] },
++        }
++      }
+       case 'assistant/attempt': {
+         const open = state.openStep
+         if (open === null || open.turn !== event.data.turn || open.step !== event.data.step) return state
+@@ -150,15 +181,15 @@
+         // defensive duplicate cannot accrue twice.
+         const next: SessionStatsState = {
+           ...state,
+-          llmMs: state.llmMs + Math.max(0, event.time - open.startTime),
++          llmMs: state.llmMs + modelElapsed(open.startTime, event.time, open.compactionSpans),
+           openStep: null,
+         }
+         if (firstToken !== null) {
+-          next.ttftMs += Math.max(0, firstToken - open.startTime)
++          next.ttftMs += modelElapsed(open.startTime, firstToken, open.compactionSpans)
+           next.ttftSteps += 1
+           const outputTokens = usageOutputTokens(event.data.usage)
+           if (outputTokens !== null) {
+-            next.decodeMs += Math.max(0, event.time - firstToken)
++            next.decodeMs += modelElapsed(firstToken, event.time, open.compactionSpans)
+             next.decodeTokens += outputTokens
+           }
+         }
+@@ -203,6 +234,7 @@
+       steps: state.steps,
+       llmMs: state.llmMs,
+       toolMs: state.toolMs,
++      compactionMs: state.compactionMs,
+       ttftMs: state.ttftMs,
+       ttftSteps: state.ttftSteps,
+       decodeMs: state.decodeMs,
+diff --git a/packages/session/session-stats/src/types.ts b/packages/session/session-stats/src/types.ts
+--- a/packages/session/session-stats/src/types.ts
++++ b/packages/session/session-stats/src/types.ts
+@@ -24,10 +24,12 @@
+   turns: number
+   /** Closed steps (`step/end` events) — completed, failed, and cancelled steps alike. */
+   steps: number
+-  /** Summed model wall time (`step/start` → `assistant/message`) over steps that assembled a message. */
++  /** Model wall time (`step/start` → `assistant/message`) excluding overlapping compaction attempts. */
+   llmMs: number
+   /** Summed tool wall time over `tool/call` → `tool/result` pairs matched by callId. */
+   toolMs: number
++  /** Completed `compaction/start` → matching `compaction/end` wall time, including failures; absent on older providers. */
++  compactionMs?: number
+   /** Summed first-token latency (`step/start` → first non-empty delta chunk) over `ttftSteps`. */
+   ttftMs: number
+   /** Steps carrying a recorded first token. */
+diff --git a/packages/session/session-stats/tests/projection.spec.ts b/packages/session/session-stats/tests/projection.spec.ts
+--- a/packages/session/session-stats/tests/projection.spec.ts
++++ b/packages/session/session-stats/tests/projection.spec.ts
+@@ -52,7 +52,7 @@
+ /** The all-zero projection value plus overrides, for exact fold expectations. */
+ function totals(overrides: Partial<SessionStatsProjection> = {}): SessionStatsProjection {
+   return {
+-    turns: 0, steps: 0, llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
++    turns: 0, steps: 0, llmMs: 0, toolMs: 0, compactionMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0,
+     ...overrides,
+   }
+ }
+@@ -197,6 +197,52 @@
+     })
+   }
+ 
++  it('separates pressure compaction from model and first-token time in the same step', () => {
++    expect(fold([
++      at(1_000, 'step/start', { turn: 1, step: 1 }),
++      at(1_200, 'compaction/start', { compactionId: 'pressure' }),
++      at(3_200, 'compaction/end', { compactionId: 'pressure' }),
++      messageAt(4_800, [{time:3_800,chunk:{type:'text-delta',index:0,text:'answer'}}], { inputTokens:10,outputTokens:60 }),
++      at(4_900, 'step/end', {turn:1,step:1}),
++    ])).toEqual(totals({turns:1,steps:1,llmMs:1_800,compactionMs:2_000,ttftMs:800,ttftSteps:1,decodeMs:1_000,decodeTokens:60}))
++  })
++
++  it('excludes retry compaction after the first token from decoding, including failed attempts', () => {
++    expect(fold([
++      at(1_000,'step/start',{turn:1,step:1}),
++      attemptAt(1_600,[{time:1_500,chunk:{type:'text-delta',index:0,text:'partial'}}]),
++      at(1_800,'compaction/start',{compactionId:'retry'}),
++      at(2_800,'compaction/end',{compactionId:'retry',error:[]}),
++      messageAt(4_800,[],{inputTokens:10,outputTokens:60}),
++      at(4_900,'step/end',{turn:1,step:1}),
++    ])).toEqual(totals({turns:1,steps:1,llmMs:2_800,compactionMs:1_000,ttftMs:500,ttftSteps:1,decodeMs:2_300,decodeTokens:60}))
++  })
++
++  it('counts idle compaction once without reducing a later model interval', () => {
++    expect(fold([
++      at(100,'compaction/start',{compactionId:'manual'}),
++      at(1_100,'compaction/end',{compactionId:'manual'}),
++      at(1_150,'compaction/end',{compactionId:'manual'}),
++      at(1_200,'step/start',{turn:1,step:1}),messageAt(2_200),
++    ])).toEqual(totals({compactionMs:1_000,llmMs:1_000}))
++  })
++
++  it('leaves unmatched ends and unfinished attempts uncounted and clamps clock rollback', () => {
++    expect(fold([
++      at(100,'compaction/end',{compactionId:'missing'}),
++      at(200,'compaction/start',{compactionId:'unfinished'}),
++      at(400,'compaction/start',{compactionId:'clock'}),
++      at(300,'compaction/end',{compactionId:'clock'}),
++    ])).toEqual(totals())
++  })
++
++  it('rejects the prior cached state so registry replay rebuilds timing with version two', () => {
++    expect(sessionStatsProjectionDefinition.stateVersion).toBe(2)
++    const {pendingCompactions: _pending,compactionMs: _elapsed,...old} = sessionStatsProjectionDefinition.init()
++    expect(sessionStatsProjectionDefinition.stateSchema.safeParse(old).success).toBe(false)
++    expect(sessionStatsProjectionDefinition.stateSchema.safeParse(sessionStatsProjectionDefinition.init()).success).toBe(true)
++  })
++
+   it('accrues model, first-token, and decode time from one fully recorded step', () => {
+     expect(fold([
+       at(1_000, 'step/start', { turn: 1, step: 1 }),
+diff --git a/packages/session/session-stats/README.md b/packages/session/session-stats/README.md
+--- a/packages/session/session-stats/README.md
++++ b/packages/session/session-stats/README.md
+@@ -41,7 +41,8 @@
+ |---|---|
+ | `turns` | Distinct turns with at least one closed step; rejected or empty turns are uncounted |
+ | `steps` | Closed steps — completed, failed, cancelled, and max-tokens steps all count |
+-| `llmMs` | Summed model wall time over steps that assembled a message |
++| `llmMs` | Summed model wall time over message-assembling steps, excluding overlapping compaction |
++| `compactionMs` | Matched compaction start-to-end wall time, including failed attempts; unfinished attempts are not yet counted |
+ | `toolMs` | Summed matched `tool/call` → `tool/result` wall time |
+ | `ttftMs` / `ttftSteps` | Summed first-token latency and the steps carrying it |
+ | `decodeMs` / `decodeTokens` | Summed decode wall time and provider output tokens over usage-reporting steps |
+@@ -76,11 +77,12 @@
+ 
+ ### Data model
+ 
+-The fold state holds the eight totals plus in-flight boundaries: `lastTurn` (turn of the last counted `step/end`), `openStep` (the open step's boundary facts, closed by its `assistant/message`), and `pendingCalls` (tool dispatch times by callId). The wire view is a strict subset — the eight totals — so the persisted-cache state schema extends the view schema with the boundary fields.
++State version 2 rebuilds prior cached totals from the original log. The fold state holds nine totals plus in-flight boundaries: `lastTurn` (turn of the last counted `step/end`), `openStep` (the open step's boundary facts, closed by its `assistant/message`), and `pendingCalls` (tool dispatch times by callId). The wire view is a strict subset — the nine totals — so the persisted-cache state schema extends the view schema with the boundary fields.
+ 
+ ### Fold rules
+ 
+ - Uninteresting events return the same state reference; the registry's `Object.is` gate keeps the change feed quiet.
++- Compaction is paired by transaction id. Its overlap is removed from model, first-token, and decode intervals; standalone compaction contributes only its own duration.
+ - First-token latency records the first non-empty delta chunk and survives an in-step `llm/retry`.
+ - Decode time and tokens accrue only over steps carrying both a first token and a valid provider usage report; malformed usage is ignored like the window fold guards node usage.
+ - Tool time pairs `tool/call` → `tool/result` by callId; unresolved calls are dropped at `turn/end` because results land within their turn, and a callId colliding with an `Object` prototype name reads as unmatched.
+diff --git a/packages/session/session-stats/README.zh.md b/packages/session/session-stats/README.zh.md
+--- a/packages/session/session-stats/README.zh.md
++++ b/packages/session/session-stats/README.zh.md
+@@ -41,7 +41,8 @@
+ |---|---|
+ | `turns` | 含至少一个已关闭步的不同轮次；被拒绝或空轮不计 |
+ | `steps` | 已关闭的步——完成、失败、取消与 max-tokens 的步全部计入 |
+-| `llmMs` | 组装出消息的步的模型墙钟时间之和 |
++| `llmMs` | 组装出消息的步的模型墙钟时间之和，扣除与压缩重叠的部分 |
++| `compactionMs` | 匹配的压缩开始到结束墙钟时间，含失败尝试；未结束尝试暂不累计 |
+ | `toolMs` | 匹配的 `tool/call` → `tool/result` 墙钟时间之和 |
+ | `ttftMs` / `ttftSteps` | 首 token 延迟之和及其承载步数 |
+ | `decodeMs` / `decodeTokens` | 上报用量的步的解码墙钟时间与提供方输出 token 之和 |
+@@ -76,11 +77,12 @@
+ 
+ ### 数据模型
+ 
+-折叠状态保存八个总计外加进行中的边界：`lastTurn`（最近一次被计数 `step/end` 的轮次）、`openStep`（打开步的边界事实，由其 `assistant/message` 关闭）与 `pendingCalls`（按 callId 记录的工具分发时间）。wire 视图是严格子集——八个总计——因此持久缓存的状态 schema 以边界字段扩展视图 schema。
++折叠状态保存九个总计外加进行中的边界：`lastTurn`（最近一次被计数 `step/end` 的轮次）、`openStep`（打开步的边界事实，由其 `assistant/message` 关闭）与 `pendingCalls`（按 callId 记录的工具分发时间）。wire 视图是严格子集——九个总计——因此持久缓存的状态 schema 以边界字段扩展视图 schema。
+ 
+ ### 折叠规则
+ 
+ - 不相关事件返回同一状态引用；注册表的 `Object.is` 门禁保持变更流安静。
++- 压缩按事务身份配对；模型、首 token 和解码区间扣除重叠时段，独立压缩只贡献自身耗时。缓存状态版本升为 2，旧缓存从原日志重建。
+ - 首 token 延迟记录首个非空 delta chunk，并在步内 `llm/retry` 后保留。
+ - 解码时间与 token 只在同时携带首 token 与有效提供方用量报告的步上累加；与窗口折叠守卫节点用量一样忽略畸形用量。
+ - 工具时间按 callId 配对 `tool/call` → `tool/result`；未解决的调用在 `turn/end` 时丢弃，因为结果总在其轮内落地，而撞上 `Object` 原型名的 callId 读作未匹配。
+diff --git a/packages/session/session-stats/package.json b/packages/session/session-stats/package.json
+--- a/packages/session/session-stats/package.json
++++ b/packages/session/session-stats/package.json
+@@ -39,7 +39,8 @@
+     "@deepseek-ai/dsh-llm": "workspace:*",
+     "@deepseek-ai/dsh-session": "workspace:*",
+     "@deepseek-ai/dsh-session-projection": "workspace:*",
+-    "@deepseek-ai/cordis": "workspace:~"
++    "@deepseek-ai/cordis": "workspace:~",
++    "@deepseek-ai/dsh-compaction": "workspace:*"
+   },
+   "dependencies": {
+     "zod": "^4.4.3"
+@@ -50,6 +51,7 @@
+     "@deepseek-ai/dsh-llm": "workspace:*",
+     "@deepseek-ai/dsh-session": "workspace:*",
+     "@deepseek-ai/dsh-session-projection": "workspace:*",
+-    "@deepseek-ai/cordis": "workspace:~"
++    "@deepseek-ai/cordis": "workspace:~",
++    "@deepseek-ai/dsh-compaction": "workspace:*"
+   }
+ }
+diff --git a/packages/session/session-stats/tsconfig.json b/packages/session/session-stats/tsconfig.json
+--- a/packages/session/session-stats/tsconfig.json
++++ b/packages/session/session-stats/tsconfig.json
+@@ -22,6 +22,9 @@
+     },
+     {
+       "path": "../session-projection"
++    },
++    {
++      "path": "../../compaction/compaction"
+     }
+   ]
+ }
+diff --git a/packages/client/ui-chat/src/client/chat/StatsPills.tsx b/packages/client/ui-chat/src/client/chat/StatsPills.tsx
+--- a/packages/client/ui-chat/src/client/chat/StatsPills.tsx
++++ b/packages/client/ui-chat/src/client/chat/StatsPills.tsx
+@@ -28,6 +28,8 @@
+   llmMs: number
+   /** Summed tool wall time (tool/call → tool/result); 0 when no pair is in-window. */
+   toolMs: number
++  /** Whole-log compaction time; unavailable in the paged-node fallback. */
++  compactionMs?: number
+   /** Summed first-token latency over `ttftSteps`; 0 when no step records it. */
+   ttftMs: number
+   /** Steps carrying a recorded TTFT. */
+@@ -240,12 +242,12 @@
+   const speed = stats.decodeMs > 0 ? decodeSpeed(stats, t) : null
+   const icon = <IconGaugeOutlineRegular />
+   if (mode === 'compact') return speed === null ? null : <PlainPill stat="activity" icon={icon} label={speed} />
+-  if (stats.steps === 0) return null
++  if (stats.steps === 0 && !(stats.compactionMs !== undefined && stats.compactionMs > 0)) return null
+   const counts = t('stats.counts', { turns: stats.turns, steps: stats.steps })
+   const content: PillContent = { stat: 'activity', icon, label: joined(counts, speed) }
+   // A window without one timed figure has no dialog rows to show, so the pill
+   // stays a plain reading instead of a button opening an empty dialog.
+-  if (stats.llmMs <= 0 && stats.toolMs <= 0 && stats.ttftSteps <= 0 && speed === null) return <PlainPill {...content} />
++  if (stats.llmMs <= 0 && stats.toolMs <= 0 && !(stats.compactionMs !== undefined && stats.compactionMs > 0) && stats.ttftSteps <= 0 && speed === null) return <PlainPill {...content} />
+   return (
+     <DialogPill {...content} ariaLabel={speed === null ? counts : `${counts} · ${speed}`} title={t('stats.dialog.title')}>
+       <dl className={dialogCss.details} data-session-stats-details>
+@@ -259,6 +261,12 @@
+           <>
+             <dt>{t('stats.dialog.toolTime')}</dt>
+             <dd>{formatDuration(stats.toolMs, t)}</dd>
++          </>
++        )}
++        {stats.compactionMs !== undefined && stats.compactionMs > 0 && (
++          <>
++            <dt>{t('stats.dialog.compactionTime')}</dt>
++            <dd>{formatDuration(stats.compactionMs, t)}</dd>
+           </>
+         )}
+         {stats.ttftSteps > 0 && (
+diff --git a/packages/client/ui-chat/src/client/locale.ts b/packages/client/ui-chat/src/client/locale.ts
+--- a/packages/client/ui-chat/src/client/locale.ts
++++ b/packages/client/ui-chat/src/client/locale.ts
+@@ -80,6 +80,7 @@
+   'stats.dialog.usageTitle': 'Token 用量',
+   'stats.dialog.llmTime': '模型用时',
+   'stats.dialog.toolTime': '工具调用用时',
++  'stats.dialog.compactionTime': '上下文压缩用时',
+   'stats.dialog.ttft': '首 token 平均（TTFT）',
+   'stats.dialog.speed': '输出速度（TPS）',
+   'chat.loadingHistory': '载入历史…',
+@@ -273,6 +274,7 @@
+   'stats.dialog.usageTitle': 'Token usage',
+   'stats.dialog.llmTime': 'LLM time',
+   'stats.dialog.toolTime': 'Tool time',
++  'stats.dialog.compactionTime': 'Context compaction time',
+   'stats.dialog.ttft': 'Avg time to first token (TTFT)',
+   'stats.dialog.speed': 'Tokens per second (TPS)',
+   'chat.loadingHistory': 'Loading history…',
+diff --git a/packages/client/ui-chat/tests/chat-stats.client.spec.tsx b/packages/client/ui-chat/tests/chat-stats.client.spec.tsx
+--- a/packages/client/ui-chat/tests/chat-stats.client.spec.tsx
++++ b/packages/client/ui-chat/tests/chat-stats.client.spec.tsx
+@@ -462,6 +462,28 @@
+     expect(dialog.textContent).toContain('Tokens per second (TPS)20 tok/s')
+   })
+ 
++  it('shows whole-log compaction separately in the localized dialog over an empty window', () => {
++    const {source} = makeSource()
++    const projected = {tokenUsage:USAGE,sessionStats:sessionStats({turns:1,steps:1,llmMs:1_800,compactionMs:2_000})}
++    const view = render(<StatsPills {...props(source,projected)} t={t} />)
++    fireEvent.click(view.getAllByRole('button')[0]!)
++    const dialog = view.getByRole('dialog')
++    expect(dialog.textContent).toContain('模型用时1.8秒')
++    expect(dialog.textContent).toContain('上下文压缩用时2秒')
++    expect(dialog.querySelector('[data-session-stats-details]')?.textContent).toMatchInlineSnapshot('"模型用时1.8秒上下文压缩用时2秒"')
++  })
++
++  it('opens a compaction-only dialog and does not invent a duration for an older projection', () => {
++    const {source} = makeSource()
++    const view = render(<StatsPills {...props(source,{sessionStats:sessionStats({compactionMs:2_000})})} />)
++    fireEvent.click(view.getByRole('button'))
++    expect(view.getByRole('dialog').textContent).toContain('Context compaction time2s')
++    view.unmount()
++    const old = render(<StatsPills {...props(source,{sessionStats:sessionStats({turns:1,steps:1,llmMs:3_800})})} />)
++    fireEvent.click(old.getByRole('button'))
++    expect(old.getByRole('dialog').textContent).not.toContain('Context compaction time')
++  })
++
+   it('omits the cache-hit segment when nothing was billed on the input side', () => {
+     const { source } = makeSource({ nodes: [assistant(1, 1)] })
+     const view = render(<StatsPills {...props(source, {
+diff --git a/packages/client/ui-chat/README.md b/packages/client/ui-chat/README.md
+--- a/packages/client/ui-chat/README.md
++++ b/packages/client/ui-chat/README.md
+@@ -60,7 +60,7 @@
+ 
+ Settings → General → Performance & usage appears after Send behavior while busy and before Session Log upload, and stores `ui-chat.performanceUsage` as `detailed` (default) or `compact`. Compact shows only available output speed and cache-hit percentage beneath the composer, without interactive statistic dialogs or per-Turn usage. Detailed exposes session statistics and per-Turn token usage. Neither mode shows elapsed time in the completed-turn footer. The preference changes presentation only; accounting and Session events remain intact.
+ 
+-The composer statistics are two `conversation.composer.dock` list entries: `activity` (order 0, turn and step counts and output speed, with LLM time, tool time, and TTFT) and `usage` (order 1, token total and cache hit). Another plugin replaces one pill by registering the same id and the same `order`; the dock orders rows by `order`, while a lower `priority` picks the replacement: a dynamic plugin receives one automatically, and a statically composed plugin passes it explicitly. A new id adds a pill. Each pill carries its id in `data-composer-stat`. An open pill dialog closes on Escape or on a pointerdown or click outside it, so activating another pill by pointer or keyboard swaps dialogs instead of stacking them.
++The composer statistics are two `conversation.composer.dock` list entries: `activity` (order 0, turn and step counts and output speed, with LLM time, tool time, context compaction time, and TTFT) and `usage` (order 1, token total and cache hit). Another plugin replaces one pill by registering the same id and the same `order`; the dock orders rows by `order`, while a lower `priority` picks the replacement: a dynamic plugin receives one automatically, and a statically composed plugin passes it explicitly. A new id adds a pill. Each pill carries its id in `data-composer-stat`. An open pill dialog closes on Escape or on a pointerdown or click outside it, so activating another pill by pointer or keyboard swaps dialogs instead of stacking them.
+ 
+ On non-loopback browsers, the preference remains process-local because the settings scope cannot persist writes. Explicit selections update every consumer immediately; accepted Host settings reconcile the live value on loopback browsers.
+ 
+diff --git a/packages/client/ui-chat/README.zh.md b/packages/client/ui-chat/README.zh.md
+--- a/packages/client/ui-chat/README.zh.md
++++ b/packages/client/ui-chat/README.zh.md
+@@ -60,7 +60,7 @@
+ 
+ 设置 → 通用设置 → 性能与用量位于繁忙时的发送行为之后、Session Log 上传之前，将 `ui-chat.performanceUsage` 保存为 `detailed`（默认）或 `compact`。简洁模式仅在输入框下方显示可用的输出速度和缓存命中率，不显示统计交互卡片或每轮用量。详细模式提供会话统计和每轮 token 用量。两种模式的已完成轮次页脚均不显示耗时。该偏好仅影响展示，记账和 Session 事件保持完整。
+ 
+-输入框统计信息由两个 `conversation.composer.dock` 列表条目组成：`activity`（order 0，轮次数、步骤数与输出速度，以及 LLM 耗时、工具耗时与 TTFT）和 `usage`（order 1，token 总量与缓存命中）。其他插件以相同的 id 和相同的 `order` 注册即可替换某个胶囊；dock 按 `order` 排列各行，更低的 `priority` 决定由替换者渲染：动态插件会自动获得，静态组合的插件需显式传入。以新 id 注册则新增胶囊。每个胶囊在 `data-composer-stat` 中携带其 id。按下 Escape，或在已打开的对话框之外发生 pointerdown 或点击时，该对话框会关闭，因此用指针或键盘激活另一个胶囊会切换对话框，而不会叠加两个。
++输入框统计信息由两个 `conversation.composer.dock` 列表条目组成：`activity`（order 0，轮次数、步骤数与输出速度，以及 LLM 耗时、工具耗时、上下文压缩用时与 TTFT）和 `usage`（order 1，token 总量与缓存命中）。其他插件以相同的 id 和相同的 `order` 注册即可替换某个胶囊；dock 按 `order` 排列各行，更低的 `priority` 决定由替换者渲染：动态插件会自动获得，静态组合的插件需显式传入。以新 id 注册则新增胶囊。每个胶囊在 `data-composer-stat` 中携带其 id。按下 Escape，或在已打开的对话框之外发生 pointerdown 或点击时，该对话框会关闭，因此用指针或键盘激活另一个胶囊会切换对话框，而不会叠加两个。
+ 
+ 在非回环地址浏览器中，设置作用域无法持久化写入，因此该偏好仅在当前进程内生效。明确选择会立即更新所有使用方；回环地址浏览器收到 Host 已接受的设置后会同步当前值。
+ 
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -11342,6 +11342,9 @@
+       '@deepseek-ai/cordis-plugin-loader':
+         specifier: workspace:~
+         version: link:../../../vendor/loader
++      '@deepseek-ai/dsh-compaction':
++        specifier: workspace:*
++        version: link:../../compaction/compaction
+       '@deepseek-ai/dsh-llm':
+         specifier: workspace:*
+         version: link:../../llm/llm

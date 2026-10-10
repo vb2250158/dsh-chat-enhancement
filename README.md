@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.72：压缩用时独立统计
+
+会话统计新增“上下文压缩用时”，从完整日志配对压缩开始和结束事件，包含已结束的失败尝试。模型用时、首 token 延迟及解码用时扣除重叠的压缩区间；工具用时保持调用配对口径。历史统计缓存从日志重建，分页不会改变累计值。应用步骤见 [压缩统计补丁](docs/compaction-statistics.md)。
+
+Session statistics show context compaction separately. Completed attempts, including failures, contribute start-to-end time. Model, first-token, and decoding intervals exclude their overlap; tool timing retains call-to-result accounting. Versioned caches replay the original log. See [patch instructions](docs/compaction-statistics.md).
+
 ## 0.3.71：恢复能力与重试分类
 
 主会话和子会话通过配套宿主接口续跑原轮次，保留身份、模型、队列和父子关系，不添加恢复消息。临时错误只重试失败项；宿主接口缺失时提示“需更新并重启”，停用无效重试和后台轮询，悬停可查看成功数量及每项错误。

@@ -7,3 +7,4 @@ patches/2026-10-09-session-list-loading.patch whitespace=-blank-at-eol,-blank-at
 host-patches/*.patch -text
 # 标准补丁的上下文行需要保留首个空格。
 host-patches/*.patch whitespace=-blank-at-eol
+patches/2026-10-10-compaction-statistics.patch whitespace=-blank-at-eol
