@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 固定标题菜单文字夹具为 LF，Windows 检出后仍按原断言逐字核对，不改写产品输出。
+- Keep the title-menu text fixture in LF so Windows checkouts retain exact output assertions.
+
 - 更新提问图文集成夹具，提供当前生命周期、语言和消息工厂接口，覆盖单选即时发送与多选确认提交，保留图片失败回退和会话隔离检查。
 - Update the rich-question integration fixture for the current lifecycle, locale and message-factory APIs; cover immediate single-choice sending and explicit multi-choice submission while retaining image fallback and session-isolation checks.
 - 恢复测试结果改为原子发布，避免 SDK 读到未写完的 JSON；补齐后台任务 DOM 夹具的 Element 全局对象。
