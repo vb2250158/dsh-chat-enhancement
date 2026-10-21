@@ -1,6 +1,6 @@
 /** 通过正式 SDK profile 验证原会话恢复；只替换模型响应。 */
 import { writeFileSync } from 'node:fs'
-import { writeFile, access } from 'node:fs/promises'
+import { writeFile, access, rename } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -73,11 +73,15 @@ export function apply(ctx) {
       let childEvents
       try { childEvents = (await stored.read()).events } finally { await stored.close() }
       const result = { accepted, duplicate, child, requests, root: transcript(root.agent.session), childTurns: childEvents.filter(event => event.type === 'turn/end').map(event => event.data.reason.kind), childUserTexts: childEvents.filter(event => event.type === 'user/message' && event.data.source.kind === 'user').map(event => event.data.content[0].text), descriptors: childEvents.filter(event => event.type === 'subagent/descriptor').length }
-      await writeFile(join(base, 'result.json'), JSON.stringify(result))
+      await writeFile(join(base, 'result.json.tmp'), JSON.stringify(result))
+      await rename(join(base, 'result.json.tmp'), join(base, 'result.json'))
     } finally { await root.dispose() }
   }
   ctx.effect(() => {
-    const work = run().catch(async error => { if (!abort.signal.aborted) await writeFile(join(base, 'result.json'), JSON.stringify({ error: error.stack })) })
+    const work = run().catch(async error => { if (!abort.signal.aborted) {
+      await writeFile(join(base, 'result.json.tmp'), JSON.stringify({ error: error.stack }))
+      await rename(join(base, 'result.json.tmp'), join(base, 'result.json'))
+    } })
     return async () => { abort.abort(); await work }
   })
   })

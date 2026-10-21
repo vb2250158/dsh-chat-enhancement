@@ -36,9 +36,13 @@ test(`问题及选项图文保留选择、提交和失败回退 (${url})`, { ski
     const questions = await load(new URL('../../dsh-proactive-questioning/lib/client.js', import.meta.url))
     const registrations = []
     const dictionaries = new Map()
-    const slots = { inject(_key, fn) { fn() }, register(options, component) { registrations.push({ options, component }); return () => {} } }
-    await chat.apply({ slots, effect(fn) { disposers.push(fn()) }, locale: { register(name, values) { dictionaries.set(name, values); return () => {} } }, remote: { async $mount() { return () => {} } }, get: () => ({}), configForms: { get: () => ({}) }, reflect: { provide: () => () => {}, get: () => ({ read() {} }) } })
-    questions.apply({ slots })
+    const factories = []
+    const slots = { inject(_key, fn) { fn() }, register(options, component) { registrations.push({ options, component }); return () => {} }, registerFactory(options, factory) { const entry = { options, factory }; factories.push(entry); return () => { factories.splice(factories.indexOf(entry), 1) } } }
+    const context = { slots, effect(fn) { disposers.push(fn()) }, locale: { register(name, values) { dictionaries.set(name, values); return () => { dictionaries.delete(name) } } }, remote: { async $mount() { return () => {} } }, get: () => ({}), configForms: { get: () => ({}) }, reflect: { provide: () => () => {}, get: () => ({ read() {} }) } }
+    await chat.apply(context)
+    questions.apply(context)
+    assert.ok(dictionaries.has('proactive-answer'))
+    assert.equal(factories.filter(entry => entry.options.name === 'proactive-answer.message').length, 1)
     const rich = registrations.find(x => x.options.name === 'proactive.question.content')
     const dock = registrations.find(x => x.options.id === 'proactive-questioning-dock')
     const tool = registrations.find(x => x.options.key === 'queue_user_question')
@@ -48,8 +52,8 @@ test(`问题及选项图文保留选择、提交和失败回退 (${url})`, { ski
     const sent = []
     const question = { id: 'layout', question: '说明前 ![总览](https://images.test/overview.png) 说明后', detail: '细节前\n\n![细节](<C:/mock folder/detail.png>)\n\n细节后', options: [{ label: '方案 A (推荐)', description: '选项前\n\n![方案图](https://images.test/a.png)\n\n选项后 [参考](https://example.test/)' }, { label: '方案 B', description: '普通说明' }] }
     const mount = (sessionId = 'one', enabled = true) => root.render(React.createElement(React.Fragment, null,
-      React.createElement(tool.component, { sessionId: 'one', callId: 'call', block: { argsRaw: JSON.stringify({ questions: [question] }) } }),
-      React.createElement(dock.component, { sessionId, send: async text => sent.push(text), ...(enabled ? { renderSlot } : {}) })))
+      React.createElement(tool.component, { sessionId: 'one', callId: question.id, block: { argsRaw: JSON.stringify({ questions: [question] }) } }),
+      React.createElement(dock.component, { sessionId, t: key => dictionaries.get(dock.options.locale).zh[key], send: async text => sent.push(text), ...(enabled ? { renderSlot } : {}) })))
     await React.act(async () => mount())
     const projection = { images: [...document.querySelectorAll('img')].map(x => ({ alt: x.alt, src: x.src })), choices: [...document.querySelectorAll('[role="radio"]')].map(x => x.getAttribute('aria-label')) }
     const expected = JSON.parse(await readFile(new URL('./fixtures/question-images.expected.json', import.meta.url), 'utf8'))
@@ -70,17 +74,25 @@ test(`问题及选项图文保留选择、提交和失败回退 (${url})`, { ski
     await React.act(async () => document.querySelector('img[alt="方案图"]').dispatchEvent(new dom.window.Event('error')))
     assert.equal(document.querySelector('img[alt="方案图"]'), null)
     assert.match(document.body.textContent, /方案图/u)
-    await React.act(async () => document.querySelector('[role="radio"]').click())
     await React.act(async () => mount('two'))
     assert.equal(document.querySelector('[role="radio"]'), null)
     await React.act(async () => mount('one'))
-    // 会话切换重新开始当前草稿，但不会把别的会话选项带进来。
+    assert.equal(document.querySelector('[role="radio"]').getAttribute('aria-checked'), 'false')
     await React.act(async () => document.querySelector('[role="radio"]').click())
-    const chosen = document.querySelector('[role="radio"]')
-    if (chosen.getAttribute('aria-checked') !== 'true') await React.act(async () => chosen.click())
-    await React.act(async () => [...document.querySelectorAll('button')].find(x => x.textContent === '提交').click())
     assert.equal(sent.length, 1)
     assert.match(sent[0], /"selected":\["方案 A \(推荐\)"\]/u)
+    assert.equal(document.querySelector('[role="radio"]'), null)
+    question.id = 'multi-layout'
+    question.multi_select = true
+    await React.act(async () => mount())
+    const collapsedDock = document.querySelector('button[aria-expanded="false"]')
+    if (collapsedDock) await React.act(async () => collapsedDock.click())
+    await React.act(async () => document.querySelector('[role="checkbox"]').click())
+    assert.equal(document.querySelector('[role="checkbox"]').getAttribute('aria-checked'), 'true')
+    assert.equal(sent.length, 1)
+    await React.act(async () => [...document.querySelectorAll('button')].find(button => button.textContent === dictionaries.get(dock.options.locale).zh.send).click())
+    assert.equal(sent.length, 2)
+    assert.match(sent[1], /"selected":\["方案 A \(推荐\)"\]/u)
     await React.act(async () => root.render(React.createElement(rich.component, { text: '![危险](javascript:alert) ![数据](data:image/png;base64,AAAA) ![相对](../secret.png)', t })))
     assert.equal(document.querySelector('img'), null)
     assert.match(document.body.textContent, /危险.*数据.*相对/u)
