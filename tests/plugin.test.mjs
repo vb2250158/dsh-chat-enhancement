@@ -391,6 +391,12 @@ test('every assembled tool schema advertises the optional description property',
   assert.equal(Object.hasOwn(assembly.tools[0].parameters.properties, 'description'), false)
 })
 
+test('describeTools preserves rc.3 prompt presentation without executor-owned schemas', async () => {
+  const { describeTools } = await import(new URL('./lib/index.js', root))
+  const presentation = { sections: [], contexts: [], variables: {} }
+  assert.equal(describeTools(presentation, 'hint'), presentation)
+})
+
 test('describeTools returns the identical assembly when nothing needs adding', async () => {
   const { describeTools } = await import(new URL('./lib/index.js', root))
   const declared = { sections: [], contexts: [], variables: {}, tools: [{ name: 'bash', parameters: { properties: { description: { type: 'string' } } } }] }

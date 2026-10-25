@@ -303,6 +303,8 @@ function toolDescriptionHint(language) {
  * @returns the same assembly when every tool already declares one, otherwise a copy with the property added.
  */
 export function describeTools(assembly, hint) {
+  // rc.3 presentation listeners receive no executor-owned tool schemas.
+  if (!Object.hasOwn(assembly, 'tools')) return assembly
   let changed = false
   const tools = assembly.tools.map((tool) => {
     const parameters = tool.parameters

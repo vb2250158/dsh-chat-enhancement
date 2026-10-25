@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.73 (2026-10-25)
+
+- 兼容 rc.3 的提示词文字接口，避免在没有工具列表时读取 `tools.map`；保留执行器 schema、语言设置和旧接口上的工具说明增强。
+- Preserve rc.3 prompt presentation and executor-owned schemas, with a regression for the missing legacy tools list.
+- 图文集成夹具核对当前宿主的逐次图片加载标识，同时保留完整 URL、路径和选项断言。
+
 ## Unreleased
 
 - 固定标题菜单文字夹具为 LF，Windows 检出后仍按原断言逐字核对，不改写产品输出。

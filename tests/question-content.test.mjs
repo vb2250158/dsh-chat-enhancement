@@ -56,13 +56,16 @@ test(`问题及选项图文保留选择、提交和失败回退 (${url})`, { ski
       React.createElement(dock.component, { sessionId, t: key => dictionaries.get(dock.options.locale).zh[key], send: async text => sent.push(text), ...(enabled ? { renderSlot } : {}) })))
     await React.act(async () => mount())
     const projection = { images: [...document.querySelectorAll('img')].map(x => ({ alt: x.alt, src: x.src })), choices: [...document.querySelectorAll('[role="radio"]')].map(x => x.getAttribute('aria-label')) }
+    const localImage = document.querySelector('img[alt="细节"]')
+    const localLoad = localImage === null ? null : new URL(localImage.src).searchParams.get('load')
+    if (localImages) assert.match(localLoad, /^[1-9]\d*$/u, '本地图片使用当前宿主的逐次加载标识')
     const expected = JSON.parse(await readFile(new URL('./fixtures/question-images.expected.json', import.meta.url), 'utf8'))
     expected.images = expected.images.filter(image => localImages || image.alt !== '细节').map(image => ({
-      ...image, src: image.src.replace('https://harness.test/', url),
+      ...image, src: image.src.replace('https://harness.test/', url) + (image.alt === '细节' ? `&load=${localLoad}` : ''),
     }))
     assert.deepEqual(projection, expected)
     assert.equal(document.querySelectorAll('img').length, localImages ? 3 : 2)
-    assert.equal(document.querySelector('img[alt="细节"]')?.src, localImages ? `${url}api/file?path=C%3A%2Fmock%20folder%2Fdetail.png` : undefined)
+    assert.equal(localImage?.src, localImages ? `${url}api/file?path=C%3A%2Fmock%20folder%2Fdetail.png&load=${localLoad}` : undefined)
     assert.match(document.body.textContent, /选项前.*选项后/su)
     assert.equal(document.querySelector('button button, button a, button img'), null, '富文本不嵌入选择按钮')
     await React.act(async () => mount('one', false))
