@@ -1,6 +1,10 @@
 # DSH Chat Enhancement
 
-## 0.3.77：逐次模型调用明细与耗时饼图
+## 0.3.78：逐次模型调用明细与耗时饼图
+
+计时监听与聊天增强一起加载，显式依赖模型服务，并通过宿主模块导入写入日志；跨入口创建和释放会话均纳入监听。
+
+Stage observers load with the chat plugin through an explicit model-service dependency, use the host module for record publication, and observe session agents across caller scopes.
 
 辅助模型按每次请求展开，显示调用插件、用途、规则名称与 ID、模型、开始时间、总耗时、首 token 等待、首 token 后耗时及失败或中断状态。Jev 0.1.37 提供技能候选筛选、输入判断、技能注入、工具前后检查和回复检查的准确标签；没有标签的调用明确显示未标注，不推测用途。规则名称来自用户配置，不保存题目、候选内容或模型回答。
 

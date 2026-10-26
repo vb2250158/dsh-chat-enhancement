@@ -1,6 +1,7 @@
 /** Host entry for the chat-enhancement DSH bundle. */
 
 import z from '@deepseek-ai/schemastery'
+import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import { randomUUID } from 'node:crypto'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
@@ -514,7 +515,7 @@ function applyShowAudioTool(ctx, mediaStore) {
 import { installSessionRecovery, recoveryConfig } from './session-recovery.js'
 
 export const name = 'chat-enhancement'
-export const inject = ['tools', 'fs', 'agents']
+export const inject = ['tools', 'fs', 'agents', 'llm']
 
 /** Compose Agent media tools, the current-session media reader, and the language preference. */
 export function apply(ctx, config = {}) {
@@ -524,7 +525,7 @@ export function apply(ctx, config = {}) {
     scope.effect(() => scope.sessionProjections.register(createGoalMetricsProjection(z, lastAssistantStreamChunk)))
     await scope.sessionProjections.register(createSessionTimingProjection(z, runFirstTokenTime))
   })
-  ctx.inject(['agents', 'llm'], scope => installSessionTimingObserver(scope, profileRequire()('@deepseek-ai/dsh-session').appendPluginRecord))
+  installSessionTimingObserver(ctx, appendPluginRecord)
   recoveryConfig(config)
   const resolved = resolveConfig(config)
   registerSettings(ctx, config)

@@ -187,6 +187,8 @@ test('show_image writes its managed attachment into the session tool result', as
   const { apply } = await import(new URL('./lib/index.js', root))
   const tools = new Map()
   const context = {
+    on() { return () => {} },
+    agents: { list: () => [] },
     tools: { register(value) { tools.set(value.name, value) } },
     fs: {
       async resolve(filePath, options) {

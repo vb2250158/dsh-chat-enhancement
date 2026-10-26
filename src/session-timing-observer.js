@@ -70,12 +70,12 @@ export function installSessionTimingObserver(ctx, appendPluginRecord) {
       if (position !== undefined) record(position, { id: randomUUID(), phase: 'start', kind: 'turnStopping', startTime: Date.now() })
     }, { prepend: true }))
   }
-  ctx.on('agent/created', ({ agent }) => bind(agent))
+  ctx.on('agent/created', ({ agent }) => bind(agent), { global: true })
   ctx.on('agent/disposed', ({ agent }) => {
     for (const dispose of bindings.get(agent) ?? []) dispose()
     bindings.delete(agent)
     positions.delete(String(agent.id))
-  })
+  }, { global: true })
   ctx.effect(() => () => {
     for (const disposers of bindings.values()) for (const dispose of disposers) dispose()
     bindings.clear(); positions.clear(); context.disable()

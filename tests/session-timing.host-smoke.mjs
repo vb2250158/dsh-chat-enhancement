@@ -51,12 +51,17 @@ export async function apply(ctx) {
   }, { global: true, prepend: true });
 }
 `)
+  await writeFile(join(dir, 'caller.mjs'), `
+export const inject = ['agentLoop'];
+export function apply(ctx) { ctx.provide('timingCaller', { create: id => ctx.agentLoop.create(id, { provider: 'fixture', model: 'main', maxTokens: 128 }) }); }
+`)
   const entries = [['llm', 'llm'], ['core', 'session'], ['session', 'session-projection'], ['core', 'system-prompt'], ['core', 'tools'], ['core', 'tool-executor-native'], ['core', 'agent'], ['core', 'agent-loop']]
     .map(([group, name]) => ({ id: name, name: native(group, name), ...(name === 'agent-loop' ? { config: { agents: [] } } : {}) }))
   entries.push({ id: 'timing-fixture', name: pathToFileURL(join(dir, 'fixture.mjs')).href })
+  entries.push({ id: 'independent-api-caller', name: pathToFileURL(join(dir, 'caller.mjs')).href })
   await writeFile(join(dir, 'cordis.yml'), JSON.stringify(entries))
   ctx = await boot('session-timing-test', join(dir, 'cordis.yml'))
-  const agent = await ctx.agentLoop.create(SessionId('session-timing-smoke'), { provider: 'fixture', model: 'main', maxTokens: 128 })
+  const agent = await ctx.timingCaller.create(SessionId('session-timing-smoke'))
   const idle = new Promise((done, reject) => {
     const timer = setTimeout(() => { off(); reject(new Error('Agent did not become idle')) }, 10000)
     const off = ctx.on('agent/status', ({ agent: subject, status }) => { if (subject === agent && status === 'idle') { clearTimeout(timer); off(); done() } })
