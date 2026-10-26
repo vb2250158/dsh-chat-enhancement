@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import vm from 'node:vm'
 import test from 'node:test'
 
-test('built activity replacement opens a modal with measured bars, exact values and keyboard dismissal', { skip: !process.env.DSH_SOURCE_ROOT }, async () => {
+test('built statistics modal renders an exclusive pie, selectable stages and exact operation readings', { skip: !process.env.DSH_SOURCE_ROOT }, async () => {
   const sourceRoot = process.env.DSH_SOURCE_ROOT
   const require = createRequire(resolve(sourceRoot, 'packages/client/ui-primitives/package.json'))
   const React = require('react'), { JSDOM } = require('jsdom')
@@ -48,8 +48,12 @@ test('built activity replacement opens a modal with measured bars, exact values 
     let stats = { turns: 1, steps: 1, turnMs: 17800, llmMs: 3300, toolMs: 0, compactionMs: 0, otherMs: 14500,
       ttftMs: 3200, ttftSteps: 1, decodeMs: 100, decodeTokens: 24 }
     const usage = { uncachedInputTokens: 31900, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 24 }
+    let stages = { closedMs: 17800, turns: 1, firstOutputMs: 17700, firstOutputTurns: 1, measuredSpans: 2, incompleteSpans: 0,
+      phases: { turnPrepare: 100, preStep: 2400, auxiliaryModel: 12000, modelWait: 3200, modelOutput: 100 },
+      details: [{ kind: 'auxiliaryModel', name: 'fixture/judge', milliseconds: 12000, calls: 2, failed: 0 }] }
     let t = translate('zh')
-    const render = () => root.render(React.createElement(activity.component, { useProjection: name => name === 'sessionStats' ? stats : usage, t }))
+    const render = () => root.render(React.createElement(activity.component, { useProjection: name =>
+      name === 'sessionStats' ? stats : name === 'chatSessionTiming' ? stages : name === 'tokenUsage' ? usage : undefined, t }))
     await React.act(async () => render())
 
     const trigger = document.querySelector('[data-composer-stat="activity"]')
@@ -60,27 +64,36 @@ test('built activity replacement opens a modal with measured bars, exact values 
 
     const dialog = document.querySelector('[role="dialog"]')
     assert.equal(dialog.getAttribute('aria-modal'), 'true')
-    assert.match(dialog.textContent, /14,500 毫秒/)
+    assert.match(dialog.textContent, /12,000 毫秒/)
     assert.match(dialog.textContent, /3,200 毫秒/)
     assert.match(dialog.textContent, /31,900/)
-    assert.match(dialog.textContent, /不能直接相加/)
-    assert.equal(dialog.querySelectorAll('[role="img"]').length, 4)
-    const width = Number.parseFloat(dialog.querySelector('[data-kind="other"]').style.width)
-    assert.ok(Math.abs(width - 14500 / 17800 * 100) < 0.01)
+    assert.doesNotMatch(dialog.textContent, /其他处理与等待/)
+    assert.match(dialog.textContent, /同一毫秒只计入一个环节/)
+    assert.match(dialog.textContent, /17.7 秒/)
+    assert.equal(dialog.querySelectorAll('svg[role="img"]').length, 1)
+    const fractions = () => [...dialog.querySelectorAll('circle[data-stage]')].map(circle => Number(circle.getAttribute('stroke-dasharray').split(' ')[0]) / (2 * Math.PI * 82))
+    assert.ok(Math.abs(fractions().reduce((sum, value) => sum + value, 0) - 1) < 0.000001)
+    await React.act(async () => dialog.querySelector('[data-stage-legend="auxiliaryModel"]').click())
+    assert.equal(dialog.querySelectorAll('[data-stage-row]').length, 1)
+    assert.equal(dialog.querySelector('[data-stage-legend="auxiliaryModel"]').getAttribute('aria-pressed'), 'true')
+    await React.act(async () => dialog.querySelector('[data-stage-legend="auxiliaryModel"]').click())
+    assert.equal(dialog.querySelectorAll('[data-stage-row]').length, 5)
 
     stats = { ...stats, toolMs: 35600 }
     await React.act(async () => render())
-    assert.equal(document.querySelector('[data-kind="tools"]').style.width, '100%')
-    assert.match(document.querySelector('[data-timing-kind="tools"]').textContent, /200%/)
+    assert.match(dialog.textContent, /35,600 毫秒/)
+    assert.ok(Math.abs(fractions().reduce((sum, value) => sum + value, 0) - 1) < 0.000001, 'Parallel work totals cannot inflate pie shares')
     await React.act(async () => document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
     assert.equal(document.querySelector('[role="dialog"]'), null)
     assert.ok(document.activeElement === trigger, 'Escape restores focus to the statistics trigger')
     stats = { ...stats, turnMs: undefined, otherMs: undefined, compactionMs: undefined, ttftSteps: 0, decodeMs: 0 }
+    stages = undefined
     t = translate('en')
     await React.act(async () => render())
     await React.act(async () => document.querySelector('[data-composer-stat="activity"]').click())
     assert.match(document.querySelector('[role="dialog"]').textContent, /Unavailable/)
-    assert.match(document.querySelector('[role="dialog"]').textContent, /Cumulative turn time unavailable/)
+    assert.match(document.querySelector('[role="dialog"]').textContent, /Stage projection is not available yet/)
+    assert.equal(document.querySelector('svg[role="img"]'), null)
     await React.act(async () => document.querySelector('[aria-label="Close session statistics"]').click())
     stats = undefined
     await React.act(async () => render())

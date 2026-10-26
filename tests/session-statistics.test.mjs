@@ -8,14 +8,14 @@ test('reads host measurements without inventing a partition for overlapping acti
   assert.equal(result.scale, 1500)
   assert.equal(result.averageTtft, 300)
   assert.equal(result.speed, 200)
-  assert.equal(result.timings.find(row => row.key === 'other').milliseconds, 100)
+  assert.equal(result.timings.find(row => row.key === 'unrecorded').milliseconds, 100)
   assert.equal(result.timings.find(row => row.key === 'compaction').milliseconds, undefined)
 })
 
 test('missing projection and absent samples stay unavailable rather than becoming zero latency', () => {
-  assert.deepEqual(sessionStatisticsReading(undefined), { timings: [], averageTtft: undefined, speed: undefined, scale: 0 })
+  assert.deepEqual(sessionStatisticsReading(undefined), { timings: [], phases: [], averageTtft: undefined, responseWait: undefined, speed: undefined, scale: 0 })
   const result = sessionStatisticsReading({ llmMs: 0, toolMs: 0, ttftMs: 0, ttftSteps: 0, decodeMs: 0, decodeTokens: 0 })
   assert.equal(result.averageTtft, undefined)
   assert.equal(result.speed, undefined)
-  assert.equal(result.timings.find(row => row.key === 'other').milliseconds, undefined)
+  assert.equal(result.timings.find(row => row.key === 'unrecorded').milliseconds, undefined)
 })

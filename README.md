@@ -1,10 +1,14 @@
 # DSH Chat Enhancement
 
-## 0.3.75：会话统计弹窗
+## 0.3.76：阶段计时与耗时饼图
 
-点击输入框下方的会话统计按钮，可查看全会话已结束轮次的累计耗时、平均首 token、输出速度、耗时对比图、精确到毫秒的明细和 Token 用量。图表直接读取宿主的完整日志统计；各耗时区间可能重叠，使用同一时间尺度的独立条形图，不将它们相加。缺失字段显示“未提供”，其他处理与等待暂不细分原因。弹窗支持关闭按钮、Esc、焦点返回和窄屏布局，沿用当前主题。
+点击输入框下方的会话统计按钮，查看完整日志中已结束轮次的耗时饼图、阶段毫秒明细、首个模型输出等待、模型步骤首 token、输出速度和 Token 用量。点击扇区或图例可筛选阶段。每毫秒只归属一个阶段，嵌套测量优先，并行工具按时间并集计入；独立操作累计单列，不能相加作为轮次总用时。弹窗支持当前主题、窄屏、滚动、Esc 和焦点返回。
 
-Click the session statistics button below the composer to open cumulative closed-turn timing, average first-token latency, output speed, comparable time bars, millisecond readings and token usage. The dialog reads the host's whole-log projection. Independent bars share one time scale because activity intervals can overlap; missing fields remain unavailable. Other processing and waiting is not broken down further. The dialog follows the current theme, fits narrow screens, and supports Escape, its close button and return focus.
+Open the statistics button below the composer for a whole-log closed-turn pie, stage millisecond readings, wait for first model output, model-step first-token latency, output speed and token usage. Select a slice or legend entry to filter stages. Each millisecond belongs to one stage, nested measurements take priority, and parallel tools contribute their interval union. Independent operation totals appear separately and cannot be summed as turn time. The dialog follows the current theme, fits narrow screens, scrolls, and supports Escape and return focus.
+
+阶段包括输入和提示词准备、模型选择、输入预处理、请求准备、上下文检查与整理、辅助模型、模型首 token 等待、推理/正文/工具参数输出、流与消息提交、工具前置检查/执行/后处理、结果提交、步骤切换、轮次收尾、压缩、Rabi 钩子以及失败重试。原生计时以 `plugin:dsh-chat-enhancement/timing` 信息记录写入会话，通过 `chatSessionTiming` 投影发布；每次操作只记开始、结束、路由或工具名与结果，不保存提示词、参数、回复或凭据，不缓存流内容。旧日志只还原已经记录的阶段边界，无法追溯未记录的内部调用。新增计时从插件加载后的调用生效。
+
+Stages cover input and prompt preparation, selection, preprocessing, request preparation, context checks and finalization, auxiliary models, first-token wait, reasoning/answer/tool-argument output, stream and message commit, tool checks/execution/postprocessing, result commit, step transitions, turn stopping, compaction, Rabi hooks and retry handling. Informational `plugin:dsh-chat-enhancement/timing` records publish through `chatSessionTiming`. Each operation records only boundaries, route or tool names and outcomes; prompts, arguments, responses and credentials are excluded, and stream contents are never buffered. Older logs reconstruct only recorded boundaries; unrecorded internal calls cannot be recovered. New meters apply to calls after plugin activation.
 
 DSH 0.2.1-rc.3 的提示词事件不再提供工具 schema。聊天增强保留提示词和运行时上下文，不向执行器拥有的 schema 添加额外 `description` 参数；工具自身的说明、语言设置和语言锚点继续生效。旧版仍提供工具列表时保留原有参数增强。
 
