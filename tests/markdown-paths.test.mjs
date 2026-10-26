@@ -21,7 +21,7 @@ test('Markdown 服务读取工作区内外文件并保留内容校验', async ()
   const ctx = new Context()
   for (const key of ['tools', 'fs', 'agents']) ctx.provide(key)
   ctx.set('tools', { register() {} })
-  ctx.set('agents', { get(id) { return id === 'missing' ? undefined : { session: { header: { cwd: id === 'without-cwd' ? undefined : cwd } } } } })
+  ctx.set('agents', { list: () => [], get(id) { return id === 'missing' ? undefined : { session: { header: { cwd: id === 'without-cwd' ? undefined : cwd } } } } })
   ctx.set('fs', {
     async resolve(path, options) { return { displayPath: resolve(options?.cwd || fixture, path) } },
     async stat(target) { try { const info = await stat(target.displayPath); return { type: info.isFile() ? 'file' : 'directory' } } catch (error) { if (error.code === 'ENOENT') return undefined; throw error } },
