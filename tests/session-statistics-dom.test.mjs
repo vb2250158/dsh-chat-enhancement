@@ -39,6 +39,10 @@ test('built activity replacement opens a modal with measured bars, exact values 
     const activity = rows.find(row => row.options.name === 'conversation.composer.dock' && row.options.id === 'activity')
     assert.ok(activity)
     assert.ok(activity.options.priority < 0)
+    const theme = await readFile(resolve(sourceRoot, 'packages/client/ui-theme/src/styles/design-platform.css'), 'utf8')
+    const css = [...document.querySelectorAll('style')].find(style => style.textContent.includes('.dsh-session-statistics-summary')).textContent
+    const tokens = [...new Set(css.match(/--dsw-alias-[a-z0-9-]+/g))]
+    assert.deepEqual(tokens.filter(token => !theme.includes(`${token}:`)), [], 'All chart and dialog colors exist in the host theme')
     assert.equal(rows.filter(row => row.options.name === 'conversation.composer.dock' && row.options.id === 'usage').length, 0)
     const translate = language => (key, args = {}) => Object.entries(args).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, value), dictionaries.get(activity.options.locale)[language][key] ?? key)
     let stats = { turns: 1, steps: 1, turnMs: 17800, llmMs: 3300, toolMs: 0, compactionMs: 0, otherMs: 14500,
