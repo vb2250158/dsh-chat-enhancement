@@ -3,7 +3,7 @@ import test from 'node:test'
 import { installSessionTimingObserver } from '../src/session-timing-observer.js'
 
 function fixture() {
-  const events = new Map(), cleanups = [], records = [], warnings = []
+  const events = new Map(), cleanups = [], records = [], warnings = [], services = new Map()
   function on(owner, name, callback, options = {}) {
     const entry = { owner, callback }, rows = events.get(name) ?? []
     options.prepend ? rows.unshift(entry) : rows.push(entry)
@@ -15,6 +15,7 @@ function fixture() {
   const makeAgent = id => ({ id, session: { id }, ctx: { on: (...args) => on(id, ...args) } })
   const agents = [makeAgent('a'), makeAgent('b')]
   const ctx = { on: (...args) => on(undefined, ...args), effect: fn => cleanups.push(fn()),
+    provide(name, value) { services.set(name, value); return () => services.delete(name) }, get: name => services.get(name),
     agents: { list: () => agents }, logger: { warn: (...args) => warnings.push(args) } }
   const invoke = (name, args, fallback) => {
     const agent = args[0]?.agent
@@ -47,6 +48,22 @@ test('meters concurrent pre-step helper models in the correct sessions without r
   f.dispose()
 })
 
+test('caller labels survive lazy iteration and each helper request retains its own rule and latency', async () => {
+  const f = fixture(); installSessionTimingObserver(f.ctx, f.append)
+  const chunk = { type: 'text-delta', text: 'private-result' }, rule = { id: 'skills', title: 'Skill relevance' }
+  const operation = { plugin: 'fixture-gate', operation: 'skill-catalog', rules: [rule] }
+  await f.invoke('agent/pre-step', [{ agent: f.agents[0], turn: 0, step: 1 }], async () => {
+    const stream = f.ctx.get('chatStageTiming').stream(operation, () => f.invoke('llm/stream', [{ provider: 'fixture', model: 'judge' }], async function* () { yield chunk }))
+    for await (const value of stream) assert.strictEqual(value, chunk)
+  })
+  const call = f.records.find(row => row.data.phase === 'end' && row.data.role === 'auxiliary').data
+  assert.equal(call.plugin, operation.plugin); assert.equal(call.operation, operation.operation)
+  assert.deepEqual(call.rules, [rule]); assert.equal(call.parentKind, 'preStep')
+  assert.equal(call.provider, 'fixture'); assert.equal(call.model, 'judge')
+  assert.doesNotMatch(JSON.stringify(f.records), /private-result/)
+  f.dispose(); assert.equal(f.ctx.get('chatStageTiming'), undefined)
+})
+
 test('streaming is incremental, cancellation closes the source, and upstream errors keep their identity', async () => {
   const f = fixture(); installSessionTimingObserver(f.ctx, f.append)
   const agent = f.agents[0]
@@ -62,6 +79,9 @@ test('streaming is incremental, cancellation closes the source, and upstream err
   const failure = new Error('fixture failure')
   const failed = f.invoke('llm/stream', [{ sessionId: 'a', provider: 'fixture', model: 'main' }], async function* () { throw failure })
   await assert.rejects(async () => { for await (const value of failed) void value }, error => error === failure)
+  const terminal = { type: 'finish', reason: { kind: 'error', failure: { code: 'FIXTURE' } } }
+  for await (const value of f.invoke('llm/stream', [{ sessionId: 'a', provider: 'fixture', model: 'main' }], async function* () { yield terminal })) assert.strictEqual(value, terminal)
+  assert.equal(f.records.at(-1).data.failed, true)
   f.dispose()
 })
 

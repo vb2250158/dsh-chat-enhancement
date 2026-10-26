@@ -85,6 +85,20 @@ test('dispatch timestamps separate request setup from provider wait', () => {
   assert.equal(total(state.view), 100)
 })
 
+test('two calls to the same model retain separate purposes, rules and first-token timestamps', () => {
+  const first = span('auxiliaryModel', 10, 40, { id: 'first', role: 'auxiliary', provider: 'fixture', model: 'judge',
+    firstTokenTime: 30, plugin: 'fixture-gate', operation: 'skill-catalog', rules: [{ id: 'skills', title: 'Skill selection' }] })
+  const second = span('auxiliaryModel', 40, 80, { id: 'second', role: 'auxiliary', provider: 'fixture', model: 'judge',
+    firstTokenTime: 70, plugin: 'fixture-gate', operation: 'before', rules: [{ id: 'input', title: 'Input classification' }] })
+  const state = fold([event('turn/start', 0), first, second, event('turn/end', 100)])
+  assert.equal(state.view.calls.length, 2)
+  assert.equal(state.view.calls[0].firstTokenTime - state.view.calls[0].startTime, 20)
+  assert.equal(state.view.calls[1].operation, 'before')
+  assert.equal(state.view.calls[1].rules[0].id, 'input')
+  assert.equal(total(state.view), 100)
+  assert.deepEqual(projection.stateSchema.parse(JSON.parse(JSON.stringify(state))), state)
+})
+
 test('checkpoint replay, interrupted spans and malformed plugin records preserve real closed time', () => {
   const begin = { ...event(SESSION_TIMING_RECORD, 2, { id: 'pending', phase: 'start', kind: 'preStep', startTime: 2 }), ignorable: true }
   const before = fold([event('turn/start', 0), begin])

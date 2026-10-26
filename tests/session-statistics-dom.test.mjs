@@ -50,7 +50,13 @@ test('built statistics modal renders an exclusive pie, selectable stages and exa
     const usage = { uncachedInputTokens: 31900, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 24 }
     let stages = { closedMs: 17800, turns: 1, firstOutputMs: 17700, firstOutputTurns: 1, measuredSpans: 2, incompleteSpans: 0,
       phases: { turnPrepare: 100, preStep: 2400, auxiliaryModel: 12000, modelWait: 3200, modelOutput: 100 },
-      details: [{ kind: 'auxiliaryModel', name: 'fixture/judge', milliseconds: 12000, calls: 2, failed: 0 }] }
+      details: [{ kind: 'auxiliaryModel', name: 'fixture/judge', milliseconds: 12000, calls: 2, failed: 0 }],
+      calls: [{ id: 'first', role: 'auxiliary', kind: 'auxiliaryModel', phase: 'end', turn: 0, step: 1,
+        startTime: 100, endTime: 7100, firstTokenTime: 6100, provider: 'fixture', model: 'judge', plugin: 'dsh-jev-context-gate',
+        operation: 'skill-catalog', parentKind: 'preStep', rules: [{ id: 'skill-rule', title: '技能选择规则' }], failed: false },
+      { id: 'second', role: 'auxiliary', kind: 'auxiliaryModel', phase: 'end', turn: 0, step: 1,
+        startTime: 7100, endTime: 12100, firstTokenTime: 11100, provider: 'fixture', model: 'judge', plugin: 'dsh-jev-context-gate',
+        operation: 'before', parentKind: 'preStep', rules: [{ id: 'input-rule', title: '输入判断规则' }], failed: false }] }
     let t = translate('zh')
     const render = () => root.render(React.createElement(activity.component, { useProjection: name =>
       name === 'sessionStats' ? stats : name === 'chatSessionTiming' ? stages : name === 'tokenUsage' ? usage : undefined, t }))
@@ -75,6 +81,16 @@ test('built statistics modal renders an exclusive pie, selectable stages and exa
     assert.ok(Math.abs(fractions().reduce((sum, value) => sum + value, 0) - 1) < 0.000001)
     await React.act(async () => dialog.querySelector('[data-stage-legend="auxiliaryModel"]').click())
     assert.equal(dialog.querySelectorAll('[data-stage-row]').length, 1)
+    assert.equal(dialog.querySelectorAll('[data-auxiliary-call]').length, 2)
+    const callButton = dialog.querySelector('[data-auxiliary-call="first"] button')
+    assert.match(callButton.textContent, /技能候选筛选.*技能选择规则/s)
+    await React.act(async () => callButton.click())
+    assert.equal(callButton.getAttribute('aria-expanded'), 'true')
+    const callDetails = dialog.querySelector('[data-auxiliary-call="first"]').textContent
+    assert.match(callDetails, /dsh-jev-context-gate/)
+    assert.match(callDetails, /6,000 毫秒/)
+    assert.match(callDetails, /1,000 毫秒/)
+    assert.match(callDetails, /7,000 毫秒/)
     assert.equal(dialog.querySelector('[data-stage-legend="auxiliaryModel"]').getAttribute('aria-pressed'), 'true')
     await React.act(async () => dialog.querySelector('[data-stage-legend="auxiliaryModel"]').click())
     assert.equal(dialog.querySelectorAll('[data-stage-row]').length, 5)

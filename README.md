@@ -1,6 +1,14 @@
 # DSH Chat Enhancement
 
-## 0.3.76：阶段计时与耗时饼图
+## 0.3.77：逐次模型调用明细与耗时饼图
+
+辅助模型按每次请求展开，显示调用插件、用途、规则名称与 ID、模型、开始时间、总耗时、首 token 等待、首 token 后耗时及失败或中断状态。Jev 0.1.37 提供技能候选筛选、输入判断、技能注入、工具前后检查和回复检查的准确标签；没有标签的调用明确显示未标注，不推测用途。规则名称来自用户配置，不保存题目、候选内容或模型回答。
+
+Expand each auxiliary request for its plugin, purpose, configured rule names and IDs, model, start time, total duration, first-token wait, time after the first token, and failure or cancellation state. Jev 0.1.37 labels candidate selection, input classification, skill injection, tool checks and response checks. Unlabelled callers remain explicitly unlabelled; purposes are never inferred from prompt contents.
+
+其他插件可选读取 `ctx.get('chatStageTiming')`，调用 `stream({ plugin, operation?, rules?: [{ id, title? }] }, () => ctx.llm.stream(options))`。该服务通过异步上下文传递元数据，逐片段转发，保持取消与错误语义；未安装统计插件时直接调用原模型入口。标签独立于模型请求，不传给提供方。阶段投影状态版本为 2，重新回放原日志生成逐次明细。
+
+Other plugins may optionally use `ctx.get('chatStageTiming').stream({ plugin, operation?, rules?: [{ id, title? }] }, () => ctx.llm.stream(options))`; use the original model entry when the optional service is absent. Async context carries labels independently of provider options, and iteration preserves individual chunks, cancellation and failures. Projection state version 2 replays the original log for individual-call readings.
 
 点击输入框下方的会话统计按钮，查看完整日志中已结束轮次的耗时饼图、阶段毫秒明细、首个模型输出等待、模型步骤首 token、输出速度和 Token 用量。点击扇区或图例可筛选阶段。每毫秒只归属一个阶段，嵌套测量优先，并行工具按时间并集计入；独立操作累计单列，不能相加作为轮次总用时。弹窗支持当前主题、窄屏、滚动、Esc 和焦点返回。
 

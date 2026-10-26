@@ -8,6 +8,25 @@ export function installSessionTimingObserver(ctx, appendPluginRecord) {
   const context = new AsyncLocalStorage()
   const positions = new Map(), bindings = new Map()
   let warned = false
+  // Callers supply operation names separately from model inputs and transport options.
+  ctx.effect(() => ctx.provide('chatStageTiming', {
+    stream(operation, createStream) {
+      const store = { ...context.getStore(), operation }
+      return (async function* () {
+        let iterator, complete = false
+        try {
+          iterator = context.run(store, () => createStream()[Symbol.asyncIterator]())
+          while (true) {
+            const item = await context.run(store, () => iterator.next())
+            if (item.done) { complete = true; break }
+            yield item.value
+          }
+        } finally {
+          if (!complete && iterator?.return !== undefined) await context.run(store, () => iterator.return())
+        }
+      })()
+    },
+  }))
   function record(position, value) {
     try { appendPluginRecord(position.agent.session, SESSION_TIMING_RECORD, { turn: position.turn, step: position.step, ...value }) }
     catch (error) {
@@ -66,21 +85,28 @@ export function installSessionTimingObserver(ctx, appendPluginRecord) {
     const inherited = context.getStore()
     const position = options.sessionId === undefined ? inherited : positions.get(String(options.sessionId))
     if (position === undefined) return next()
-    const role = inherited !== undefined && inherited.agent === position.agent ? 'auxiliary' : 'main'
+    const operation = inherited?.operation
+    const role = operation !== undefined || options.purpose !== undefined || inherited !== undefined && inherited.agent === position.agent ? 'auxiliary' : 'main'
     const kind = role === 'main' ? 'modelCall' : 'auxiliaryModel'
     const value = { id: randomUUID(), kind, role, startTime: Date.now(),
-      detail: `${options.provider}/${options.model}` }
+      detail: `${options.provider}/${options.model}`, provider: options.provider, model: options.model,
+      ...(inherited?.phase === undefined ? {} : { parentKind: inherited.phase }),
+      ...(options.purpose === undefined ? {} : { purpose: options.purpose }),
+      ...(operation === undefined ? {} : { plugin: operation.plugin,
+        ...(operation.operation === undefined ? {} : { operation: operation.operation }),
+        ...(operation.rules === undefined ? {} : { rules: operation.rules }) }) }
     const callContext = { ...position, phase: role === 'main' ? 'mainModel' : 'auxiliaryModel' }
     return (async function* () {
       record(position, { ...value, phase: 'start' })
-      let firstTokenTime, failed = true, complete = false, iterator
+      let firstTokenTime, finishReason, failed = true, complete = false, iterator
       try {
         const source = context.run(callContext, next)
         iterator = source[Symbol.asyncIterator]()
         while (true) {
           const item = await context.run(callContext, () => iterator.next())
-          if (item.done) { complete = true; failed = false; break }
+          if (item.done) { complete = true; failed = finishReason === 'error' || finishReason === 'aborted'; break }
           const chunk = item.value
+          if (chunk.type === 'finish') finishReason = chunk.reason.kind
           if (firstTokenTime === undefined && (chunk.type === 'text-delta' || chunk.type === 'reasoning-delta') && chunk.text.length > 0) firstTokenTime = Date.now()
           yield chunk
         }
