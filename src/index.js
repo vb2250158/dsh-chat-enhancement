@@ -515,7 +515,7 @@ function applyShowAudioTool(ctx, mediaStore) {
 import { installSessionRecovery, recoveryConfig } from './session-recovery.js'
 
 export const name = 'chat-enhancement'
-export const inject = ['tools', 'fs', 'agents', 'llm']
+export const inject = ['tools', 'fs', 'agents']
 
 /** Compose Agent media tools, the current-session media reader, and the language preference. */
 export function apply(ctx, config = {}) {
