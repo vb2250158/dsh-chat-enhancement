@@ -1,10 +1,10 @@
 # DSH Chat Enhancement
 
-## 0.3.79：逐次模型调用明细与耗时饼图
+## 0.3.80：逐次模型调用明细与耗时饼图
 
-计时监听与聊天增强一起加载，通过公开全局事件观测 Agent 内的模型服务，不要求根作用域提供模型服务。通过宿主模块导入写入日志，跨入口创建和释放会话均纳入监听。
+计时监听与聊天增强一起加载，通过公开全局事件观测 Agent 内的模型服务，不要求根作用域提供模型服务。使用会话实例的公开 `append` 兼容入口写入可忽略记录，避免源码宿主与安装包加载不同 Session 类时的私有成员冲突；跨入口创建和释放会话均纳入监听。
 
-Stage observers load with the chat plugin and observe Agent-local model services through public global events, without requiring a root-scoped model service. Record publication uses the host module, and agents are observed across caller scopes.
+Stage observers load with the chat plugin and observe Agent-local model services through public global events, without requiring a root-scoped model service. Informational publication uses the Session instance's public append compatibility entry, avoiding private-member conflicts between source-host and installed-package Session classes. Agents are observed across caller scopes.
 
 辅助模型按每次请求展开，显示调用插件、用途、规则名称与 ID、模型、开始时间、总耗时、首 token 等待、首 token 后耗时及失败或中断状态。Jev 0.1.37 提供技能候选筛选、输入判断、技能注入、工具前后检查和回复检查的准确标签；没有标签的调用明确显示未标注，不推测用途。规则名称来自用户配置，不保存题目、候选内容或模型回答。
 

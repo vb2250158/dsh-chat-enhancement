@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { SESSION_TIMING_RECORD } from './session-timing.js'
 
 /** Install scoped stage meters and retain only names, timestamps and outcomes in the log. */
-export function installSessionTimingObserver(ctx, appendPluginRecord) {
+export function installSessionTimingObserver(ctx, appendPluginRecord = (session, type, data) => session.append(type, data, { ignorable: true })) {
   const context = new AsyncLocalStorage()
   const positions = new Map(), bindings = new Map()
   let warned = false

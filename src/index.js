@@ -1,7 +1,6 @@
 /** Host entry for the chat-enhancement DSH bundle. */
 
 import z from '@deepseek-ai/schemastery'
-import { appendPluginRecord } from '@deepseek-ai/dsh-session'
 import { randomUUID } from 'node:crypto'
 import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
@@ -525,7 +524,7 @@ export function apply(ctx, config = {}) {
     scope.effect(() => scope.sessionProjections.register(createGoalMetricsProjection(z, lastAssistantStreamChunk)))
     await scope.sessionProjections.register(createSessionTimingProjection(z, runFirstTokenTime))
   })
-  installSessionTimingObserver(ctx, appendPluginRecord)
+  installSessionTimingObserver(ctx)
   recoveryConfig(config)
   const resolved = resolveConfig(config)
   registerSettings(ctx, config)

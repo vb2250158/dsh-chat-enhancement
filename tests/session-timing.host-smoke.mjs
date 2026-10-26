@@ -19,13 +19,12 @@ let ctx
 try {
   await writeFile(join(dir, 'fixture.mjs'), `
 import { LlmAdapter, runFirstTokenTime } from ${JSON.stringify(native('llm', 'llm'))};
-import { appendPluginRecord } from ${JSON.stringify(native('core', 'session'))};
 import { z } from ${JSON.stringify(zod)};
 import { installSessionTimingObserver } from ${JSON.stringify(local('session-timing-observer'))};
 import { createSessionTimingProjection } from ${JSON.stringify(local('session-timing'))};
 export const inject = ['agentLoop', 'agents', 'llm', 'sessionProjections'];
 export async function apply(ctx) {
-  installSessionTimingObserver(ctx, appendPluginRecord);
+  installSessionTimingObserver(ctx);
   const projection = await ctx.sessionProjections.register(createSessionTimingProjection(z, runFirstTokenTime));
   const requests = [];
   ctx.provide('timingFixture', { projection, requests });
@@ -68,6 +67,8 @@ export function apply(ctx) { ctx.provide('timingCaller', { create: id => ctx.age
   })
   agent.followup(createUserMessage({ content: [{ type: 'text', text: 'fixture input' }], source: { kind: 'user' } }))
   await idle
+  const peer = await import(native('core', 'session') + '?duplicate-installed-peer')
+  assert.throws(() => peer.appendPluginRecord(agent.session, 'plugin:fixture/timing', { test: true }), /private|class/i)
   const state = ctx.timingFixture.projection.stateOf(agent.session)
   const auxiliary = state.view.calls.filter(call => call.role === 'auxiliary')
   if (auxiliary.length !== 2) console.log(JSON.stringify({ state, records: agent.session.snapshotEvents().map(event => ({ type: event.type, data: event.data })) }))
