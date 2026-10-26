@@ -2,7 +2,6 @@
 
 import * as React from 'react'
 import { titleDescriptor, installSessionTitlesClient } from './session-titles-client.js'
-import { installSessionStatistics } from './session-statistics-client.js'
 import { installCodeReferences } from './code-references-client.js'
 import { QuestionRichContent, questionContentLocales, questionContentCss } from './question-content.js'
 import { recoveryDescriptor, recoveryLocales, recoveryCss, SessionRecoveryPrompt } from './session-recovery-client.js'
@@ -930,7 +929,6 @@ export async function apply(ctx) {
   const dispose = await ctx.remote.$mount(previewRemote)
   installSessionTitlesClient(ctx)
   installGoalMetricsClient(ctx)
-  installSessionStatistics(ctx)
   const recoveryService = ctx.reflect.get('remote.chatRecovery')
   const readRecovery = async request => {
     const result = await recoveryService.read(request)

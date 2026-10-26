@@ -1,28 +1,14 @@
 # DSH Chat Enhancement
 
-## 0.3.80：逐次模型调用明细与耗时饼图
+## 0.3.81：性能统计迁移为独立插件
 
-计时监听与聊天增强一起加载，通过公开全局事件观测 Agent 内的模型服务，不要求根作用域提供模型服务。使用会话实例的公开 `append` 兼容入口写入可忽略记录，避免源码宿主与安装包加载不同 Session 类时的私有成员冲突；跨入口创建和释放会话均纳入监听。
+详细性能统计已迁移到 [dsh-performance-statistics](https://github.com/vb2250158/dsh-performance-statistics)。需要耗时饼图、逐次辅助模型详情和阶段计时的用户，请安装该插件；聊天增强 0.3.81 起不再注册统计监听、投影或按钮，其他聊天功能保持原有入口。
 
-Stage observers load with the chat plugin and observe Agent-local model services through public global events, without requiring a root-scoped model service. Informational publication uses the Session instance's public append compatibility entry, avoiding private-member conflicts between source-host and installed-package Session classes. Agents are observed across caller scopes.
+Detailed performance statistics now live in [dsh-performance-statistics](https://github.com/vb2250158/dsh-performance-statistics). Install it for timing pies, individual auxiliary calls and stage readings. Chat enhancement 0.3.81 no longer registers timing observers, projections or the statistics pill; other chat features keep their existing entry points.
 
-辅助模型按每次请求展开，显示调用插件、用途、规则名称与 ID、模型、开始时间、总耗时、首 token 等待、首 token 后耗时及失败或中断状态。Jev 0.1.37 提供技能候选筛选、输入判断、技能注入、工具前后检查和回复检查的准确标签；没有标签的调用明确显示未标注，不推测用途。规则名称来自用户配置，不保存题目、候选内容或模型回答。
+独立插件继续读取 0.3.80 及此前已记录的计时信息，不改写历史会话。配合 Jev 0.1.37 的标签服务继续有效；不要同时启用独立插件与包含统计功能的旧聊天增强版本。
 
-Expand each auxiliary request for its plugin, purpose, configured rule names and IDs, model, start time, total duration, first-token wait, time after the first token, and failure or cancellation state. Jev 0.1.37 labels candidate selection, input classification, skill injection, tool checks and response checks. Unlabelled callers remain explicitly unlabelled; purposes are never inferred from prompt contents.
-
-其他插件可选读取 `ctx.get('chatStageTiming')`，调用 `stream({ plugin, operation?, rules?: [{ id, title? }] }, () => ctx.llm.stream(options))`。该服务通过异步上下文传递元数据，逐片段转发，保持取消与错误语义；未安装统计插件时直接调用原模型入口。标签独立于模型请求，不传给提供方。阶段投影状态版本为 2，重新回放原日志生成逐次明细。
-
-Other plugins may optionally use `ctx.get('chatStageTiming').stream({ plugin, operation?, rules?: [{ id, title? }] }, () => ctx.llm.stream(options))`; use the original model entry when the optional service is absent. Async context carries labels independently of provider options, and iteration preserves individual chunks, cancellation and failures. Projection state version 2 replays the original log for individual-call readings.
-
-点击输入框下方的会话统计按钮，查看完整日志中已结束轮次的耗时饼图、阶段毫秒明细、首个模型输出等待、模型步骤首 token、输出速度和 Token 用量。点击扇区或图例可筛选阶段。每毫秒只归属一个阶段，嵌套测量优先，并行工具按时间并集计入；独立操作累计单列，不能相加作为轮次总用时。弹窗支持当前主题、窄屏、滚动、Esc 和焦点返回。
-
-Open the statistics button below the composer for a whole-log closed-turn pie, stage millisecond readings, wait for first model output, model-step first-token latency, output speed and token usage. Select a slice or legend entry to filter stages. Each millisecond belongs to one stage, nested measurements take priority, and parallel tools contribute their interval union. Independent operation totals appear separately and cannot be summed as turn time. The dialog follows the current theme, fits narrow screens, scrolls, and supports Escape and return focus.
-
-阶段包括输入和提示词准备、模型选择、输入预处理、请求准备、上下文检查与整理、辅助模型、模型首 token 等待、推理/正文/工具参数输出、流与消息提交、工具前置检查/执行/后处理、结果提交、步骤切换、轮次收尾、压缩、Rabi 钩子以及失败重试。原生计时以 `plugin:dsh-chat-enhancement/timing` 信息记录写入会话，通过 `chatSessionTiming` 投影发布；仅记录起止时间、路由、工具名、规则标签与结果，不保存提示词、参数、回复或凭据，不缓存流内容。旧日志只还原已经记录的阶段边界，无法追溯未记录的内部调用。新增计时从插件加载后的调用生效。
-
-Stages cover input and prompt preparation, selection, preprocessing, request preparation, context checks and finalization, auxiliary models, first-token wait, reasoning/answer/tool-argument output, stream and message commit, tool checks/execution/postprocessing, result commit, step transitions, turn stopping, compaction, Rabi hooks and retry handling. Informational `plugin:dsh-chat-enhancement/timing` records publish through `chatSessionTiming`. Each operation records only boundaries, route or tool names, rule labels and outcomes; prompts, arguments, responses and credentials are excluded, and stream contents are never buffered. Older logs reconstruct only recorded boundaries; unrecorded internal calls cannot be recovered. New meters apply to calls after plugin activation.
-
-DSH 0.2.1-rc.3 的提示词事件不再提供工具 schema。聊天增强保留提示词和运行时上下文，不向执行器拥有的 schema 添加额外 `description` 参数；工具自身的说明、语言设置和语言锚点继续生效。旧版仍提供工具列表时保留原有参数增强。
+The standalone plugin reads historical timing records without rewriting Sessions and keeps Jev 0.1.37 labels compatible. Do not enable it alongside older chat enhancement versions that still own statistics.
 
 ## 0.3.72：压缩用时独立统计
 

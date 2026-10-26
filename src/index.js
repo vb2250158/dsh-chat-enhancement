@@ -6,8 +6,6 @@ import { basename, extname, isAbsolute, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { createGoalMetricsProjection } from './goal-metrics.js'
-import { createSessionTimingProjection } from './session-timing.js'
-import { installSessionTimingObserver } from './session-timing-observer.js'
 import { installSessionTitles } from './session-titles.js'
 import {
   AUTO_LANGUAGE,
@@ -520,11 +518,9 @@ export const inject = ['tools', 'fs', 'agents']
 export function apply(ctx, config = {}) {
   ctx.inject(['sessionProjections'], async scope => {
     const { z } = profileRequire()('zod')
-    const { lastAssistantStreamChunk, runFirstTokenTime } = profileRequire()('@deepseek-ai/dsh-llm')
+    const { lastAssistantStreamChunk } = profileRequire()('@deepseek-ai/dsh-llm')
     scope.effect(() => scope.sessionProjections.register(createGoalMetricsProjection(z, lastAssistantStreamChunk)))
-    await scope.sessionProjections.register(createSessionTimingProjection(z, runFirstTokenTime))
   })
-  installSessionTimingObserver(ctx)
   recoveryConfig(config)
   const resolved = resolveConfig(config)
   registerSettings(ctx, config)
