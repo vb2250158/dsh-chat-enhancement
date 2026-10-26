@@ -16,12 +16,14 @@ const codeReferences = strip(await readFile(new URL('src/code-references.js', ro
 const codeReferencesClient = strip(await readFile(new URL('src/code-references-client.js', root), 'utf8'))
 const client = strip(await readFile(new URL('src/client.js', root), 'utf8'))
 const goalMetrics = strip(await readFile(new URL('src/goal-metrics-client.js', root), 'utf8'))
+const sessionStatistics = strip(await readFile(new URL('src/session-statistics.js', root), 'utf8'))
+const sessionStatisticsClient = strip(await readFile(new URL('src/session-statistics-client.js', root), 'utf8'))
 await writeFile(new URL('lib/client.js', root), `window.__ModuleLoader__.load({
   id: 'dsh-chat-enhancement',
   factory: (require) => {
     const React = require('react')
     const { GoalBar, GoalEditDialog, GoalEditDialogController } = require('@deepseek-ai/dsh-client-ui-goal')
-    const { CodeBlock, MarkdownText, Modal, Button, Menu, MenuItemButton, IconSparkleRegular, IconChevronDownOutlineRegular, StateDot, Tooltip, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { CodeBlock, MarkdownText, Modal, Pill, IconGaugeOutlineRegular, Button, Menu, MenuItemButton, IconSparkleRegular, IconChevronDownOutlineRegular, StateDot, Tooltip, Switch } = require('@deepseek-ai/dsh-client-ui-primitives')
 ${languages}
 ${sessionTitles}
 ${annotations}
@@ -29,6 +31,8 @@ ${backgroundJobs}
 ${recoveryClient}
 ${questionContent}
 ${goalMetrics}
+${sessionStatistics}
+${sessionStatisticsClient}
 ${codeReferences}
 ${codeReferencesClient}
 ${client}

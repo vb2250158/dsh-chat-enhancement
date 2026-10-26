@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.74：会话统计弹窗
+
+点击输入框下方的会话统计按钮，可查看全会话已结束轮次的累计耗时、平均首 token、输出速度、耗时对比图、精确到毫秒的明细和 Token 用量。图表直接读取宿主的完整日志统计；各耗时区间可能重叠，使用同一时间尺度的独立条形图，不将它们相加。缺失字段显示“未提供”，其他处理与等待暂不细分原因。弹窗支持关闭按钮、Esc、焦点返回和窄屏布局，沿用当前主题。
+
+Click the session statistics button below the composer to open cumulative closed-turn timing, average first-token latency, output speed, comparable time bars, millisecond readings and token usage. The dialog reads the host's whole-log projection. Independent bars share one time scale because activity intervals can overlap; missing fields remain unavailable. Other processing and waiting is not broken down further. The dialog follows the current theme, fits narrow screens, and supports Escape, its close button and return focus.
+
 DSH 0.2.1-rc.3 的提示词事件不再提供工具 schema。聊天增强保留提示词和运行时上下文，不向执行器拥有的 schema 添加额外 `description` 参数；工具自身的说明、语言设置和语言锚点继续生效。旧版仍提供工具列表时保留原有参数增强。
 
 ## 0.3.72：压缩用时独立统计
