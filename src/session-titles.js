@@ -17,6 +17,7 @@ export function isUnnamedTitle(title) {
 export class SessionTitles {
   constructor(ctx, config = {}) {
     this.ctx = ctx; this.pending = new Map(); this.timeZone = config.emptyTitleTimeZone ?? 'UTC'
+    this.automatic = new Map(); this.shutdown = new AbortController()
     new Intl.DateTimeFormat('sv-SE', { timeZone: this.timeZone })
   }
 
@@ -29,16 +30,17 @@ export class SessionTitles {
     }) }
   }
 
-  async read(request) {
+  async read(request, signal = this.shutdown.signal) {
+    signal.throwIfAborted()
     if (request.action === 'list') return this.list()
     const existing = this.pending.get(request.sessionId)
     if (existing) return existing
-    const work = this.rename(request).finally(() => this.pending.delete(request.sessionId))
+    const work = this.rename(request, signal).finally(() => this.pending.delete(request.sessionId))
     this.pending.set(request.sessionId, work)
     return work
   }
 
-  async rename(request) {
+  async rename(request, signal) {
     let session = this.ctx.sessions.get(request.sessionId)
     if (!session) {
       const result = await this.ctx.sessionController.resolveAgent(request.sessionId)
@@ -53,7 +55,7 @@ export class SessionTitles {
     let accepted
     if (!human) accepted = this.ctx.sessionTitle.rename(session, emptySessionTitle(session.header, this.timeZone))
     else {
-      try { accepted = await this.ctx.sessionTitle.refresh(session) }
+      try { accepted = await this.ctx.sessionTitle.refresh(session, signal) }
       catch (error) {
         const fallback = this.ctx.sessionTitle.get(session)
         if (!isUnnamedTitle(before?.title) || fallback?.source.kind !== 'fallback' || isUnnamedTitle(fallback.title)) throw error
@@ -64,6 +66,50 @@ export class SessionTitles {
     const after = this.ctx.sessionTitle.get(session)
     if (after?.title !== accepted.title) throw new Error('Session title readback differs from accepted title')
     return { sessionId: session.id, title: after.title, kind: human ? after.source.kind : 'empty' }
+  }
+
+  /** Automatic placeholder replacement waits outside the foreground and the provider deadline. */
+  queueAutomatic(session) {
+    if (this.shutdown.signal.aborted) return
+    const before = this.ctx.sessionTitle.get(session)
+    if (before?.title !== emptySessionTitle(session.header, this.timeZone)) return
+    const existing = this.automatic.get(session.id)
+    if (existing) return existing.promise
+    const controller = new AbortController()
+    const signal = AbortSignal.any([controller.signal, this.shutdown.signal])
+    const job = { controller, promise: undefined }
+    this.automatic.set(session.id, job)
+    job.promise = (async () => {
+      const agent = this.ctx.agents.get(session.id)
+      if (agent) {
+        let rejectAbort
+        const aborted = new Promise((_, reject) => { rejectAbort = reject })
+        const onAbort = () => rejectAbort(signal.reason)
+        signal.throwIfAborted()
+        signal.addEventListener('abort', onAbort, { once: true })
+        try { await Promise.race([agent.whenIdle(), aborted]) }
+        finally { signal.removeEventListener('abort', onAbort) }
+      }
+      signal.throwIfAborted()
+      if (this.ctx.sessions.get(session.id) !== session) return
+      const current = this.ctx.sessionTitle.get(session)
+      if (current?.eventSeq !== before.eventSeq || current?.title !== before.title) return
+      return this.read({ action: 'rename', sessionId: session.id }, signal)
+    })().catch(error => {
+      if (!signal.aborted) this.ctx.logger.warn(`session "${session.id}": empty-session title refresh failed: ${String(error)}`)
+    }).finally(() => {
+      if (this.automatic.get(session.id) === job) this.automatic.delete(session.id)
+    })
+    return job.promise
+  }
+
+  /** Cancel queued or active automatic work before releasing a Session. */
+  cancelAutomatic(sessionId) { this.automatic.get(sessionId)?.controller.abort(new Error('Title session disposed')) }
+
+  /** Stop queued work and settle accepted title operations before unloading. */
+  async close() {
+    this.shutdown.abort(new Error('Chat title operations unloaded'))
+    await Promise.allSettled([...this.automatic.values()].map(job => job.promise).concat([...this.pending.values()]))
   }
 }
 
@@ -78,8 +124,8 @@ export function installSessionTitles(ctx, protocol, config = {}) {
   protocol.Remote('read')(ChatTitlesService.prototype.read, { private: false, static: false, name: 'read', addInitializer(initializer) { initializers.push(initializer) } })
   new ChatTitlesService()
   ctx.on('session/event', (session, event) => {
-    if (event.type !== 'request/header' || ctx.sessionTitle.get(session)?.title !== emptySessionTitle(session.header, titles.timeZone)) return
-    void titles.read({ action: 'rename', sessionId: session.id }).catch(error => ctx.logger.warn(`session "${session.id}": empty-session title refresh failed: ${String(error)}`))
+    if (event.type === 'request/header') void titles.queueAutomatic(session)
   })
-  ctx.effect(() => () => Promise.allSettled([...titles.pending.values()]), 'chat title operations')
+  ctx.on('session/disposed', session => titles.cancelAutomatic(session.id))
+  ctx.effect(() => () => titles.close(), 'chat title operations')
 }

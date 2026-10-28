@@ -11,7 +11,8 @@ test('正式 Host 注册标题服务，首消息替换空会话名称，卸载�
   const session = Session.create(SessionId('fixture-host-title'))
   const events = []
   let state = { title: emptySessionTitle(session.header), source: { kind: 'user' } }
-  for (const name of ['sessions', 'sessionTitle', 'sessionController', 'sessionProjections']) ctx.provide(name)
+  for (const name of ['sessions', 'sessionTitle', 'sessionController', 'sessionProjections', 'agents']) ctx.provide(name)
+  ctx.set('agents', { get: () => undefined })
   ctx.set('sessions', { get: () => session })
   ctx.set('sessionController', { async list() { return { items: [] } } })
   ctx.set('sessionProjections', { stateOf: () => ({ count: events.length }) })

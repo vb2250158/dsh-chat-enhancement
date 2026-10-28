@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.82：空会话自动改名不阻塞正文
+
+空会话首次收到消息后，自动标题刷新会等待当前 Agent 空闲，再在后台生成并更新标题。正文和轮次结束不等待；重复请求共用一次工作，用户手动改名优先，关闭会话或卸载插件会取消排队工作。显式重新生成标题仍可立即执行。
+
+Automatic placeholder-title refresh waits for the current Agent to become idle before generating and saving the title in the background. Replies and turn completion do not wait. Repeated headers share one operation; user renames take precedence, and Session disposal or plugin unloading cancels queued work. Explicit title regeneration remains immediate.
+
 ## 0.3.81：性能统计迁移为独立插件
 
 详细性能统计已迁移到 [dsh-performance-statistics](https://github.com/vb2250158/dsh-performance-statistics)。需要耗时饼图、逐次辅助模型详情和阶段计时的用户，请安装该插件；聊天增强 0.3.81 起不再注册统计监听、投影或按钮，其他聊天功能保持原有入口。
