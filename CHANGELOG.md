@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.84 (2026-10-30)
+
+- 补齐客户端 `remote.session` 注入，修复空模型目录缓存下运行中及回复操作行的模型标签；保留官方折叠与共享模型选择。
+- Declare the client session remote dependency for running and completed reply labels. Add real Cordis regressions for first directory creation, directory reuse, and session separation without changing model selection.
+
 ## 0.3.73 (2026-10-25)
 
 - 兼容 rc.3 的提示词文字接口，避免在没有工具列表时读取 `tools.map`；保留执行器 schema、语言设置和旧接口上的工具说明增强。

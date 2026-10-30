@@ -1,5 +1,11 @@
 # DSH Chat Enhancement
 
+## 0.3.84：首次打开会话的模型标签
+
+声明模型目录所需的 `remote.session` 依赖，修复首次打开会话时运行中与已完成回复的模型标签报错。目录继续由 DSH 共享，显示标签不会切换模型。回归测试使用 `DSH_TEST_SOURCE_ROOT` 指向已构建的 DSH 源码，执行真实 Cordis 注入与首次目录创建。
+
+Declare the `remote.session` dependency required by model directories so running and completed reply labels work when a session is first opened. DSH still owns the shared directory; displaying a label never changes the selected model. Set `DSH_TEST_SOURCE_ROOT` to a built DSH checkout to run the real Cordis injection and first-directory integration tests.
+
 ## 0.3.83：使用官方折叠
 
 移除插件的工具／思考分组折叠、推理自动展开与延迟收起设置。展开状态统一由 DSH 官方组件管理，其他对话增强功能保持不变。已有折叠偏好不再读取，无需手动清理。

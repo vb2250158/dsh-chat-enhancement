@@ -595,7 +595,7 @@ const previewRemote = { package: 'dsh-chat-enhancement', descriptors: [
   },
 ] }
 
-export const inject = ['slots', 'sessions', 'remote', 'remote.goals', 'configForms', 'conversation', 'locale', 'modelDirectories', 'sidebarRight']
+export const inject = ['slots', 'sessions', 'remote', 'remote.session', 'remote.goals', 'configForms', 'conversation', 'locale', 'modelDirectories', 'sidebarRight']
 
 export async function apply(ctx) {
   ctx.effect(() => ctx.locale.register('chat-enhancement-question-content', questionContentLocales))
