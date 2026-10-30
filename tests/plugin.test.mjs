@@ -241,6 +241,55 @@ test('show_image writes its managed attachment into the session tool result', as
   })
 })
 
+test('client preserves media, jobs and settings while leaving folding to DSH', async () => {
+  const plugin = await loadBrowserPlugin()
+  const registrations = []
+  const context = {
+    effect(callback) { callback() },
+    locale: { register(namespace, dictionaries) { assert.ok(['chat-enhancement-session-statistics', 'chat-enhancement-goal-metrics', 'chat-enhancement-question-content', 'chat-enhancement-annotations', 'chat-enhancement-jobs', 'chat-enhancement-recovery', 'chat-enhancement-titles'].includes(namespace)); assert.ok(dictionaries.en); return () => {} } },
+    remote: { async $mount() { return () => {} } },
+    get(name) { return name === 'sessions' ? { binding() {} } : undefined },
+    reflect: { provide: () => () => {}, get(name) {
+      if (name === 'remote.chatMedia') return { async read() { return { ok: true, value: {} } } }
+      if (name === 'remote.chatMarkdown') return { async read() { return { ok: true, value: {} } } }
+      return undefined
+    } },
+    slots: {
+      inject(_name, callback) { callback() },
+      register(options, component) { registrations.push({ options, component }); return () => {} },
+    },
+    configForms: {
+      get(entryId) {
+        assert.equal(entryId, 'chat-enhancement')
+        return {
+          getSnapshot() { return { status: 'ready', value: { audioAutoplay: false, videoAutoplay: false }, writable: true } },
+          subscribe() { return () => {} },
+          async set() {},
+        }
+      },
+    },
+  }
+
+  await plugin.apply(context)
+  assert.ok(plugin.inject.includes('configForms'))
+  const jobList = registrations.find(({ options }) => options.id === 'job-list')
+  assert.equal(jobList.options.name, 'conversation.session.header.actions')
+  assert.equal(jobList.options.priority, 100)
+  assert.equal(jobList.component.name, 'BackgroundJobList')
+  assert.equal(registrations.some(({ options }) => options.name === 'conversation.chat.node'), false)
+  const autoplayController = registrations.find(({ options }) => options.id === 'chat-enhancement-media-autoplay-session')
+  assert.equal(autoplayController.options.name, 'conversation.input.dock')
+  assert.equal(autoplayController.component.name, 'MediaAutoplaySessionController')
+  assert.ok(registrations.every(({ options }) => !['chat-enhancement-tool-groups', 'chat-enhancement-thinking-groups', 'chat-enhancement-reasoning-auto-expand'].includes(options.id)))
+  const audioView = registrations.find(({ options }) => options.key === 'show_audio')
+  assert.equal(audioView.options.name, 'tool.call.toolview')
+  assert.equal(registrations.filter(({ options }) => options.name === 'settings.section').length, 0)
+  const sections = registrations.filter(({ options }) => options.name === 'plugins.bundle.config')
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].options.key, 'dsh-chat-enhancement')
+  assert.equal(sections[0].component.name, 'ChatEnhancementSettingsSection')
+})
+
 test('autoplay gate ignores restored history and only accepts a newly settled Agent display', async () => {
   const { createMediaAutoplayGate } = await loadBrowserPlugin()
   const gate = createMediaAutoplayGate()
