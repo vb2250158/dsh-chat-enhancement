@@ -6,7 +6,7 @@ import vm from 'node:vm'
 test('built message badge resolves exact route names without following the current selection', async () => {
   const bundle = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   let entry
-  vm.runInNewContext(bundle.replace('return { inject, apply, createMediaAutoplayGate, modelForMessage, thinkRowTarget, thinkRowExpanded, expandRunningThinkRow, collapseSettledThinkRow }', 'return { TurnModelBadge }'), {
+  vm.runInNewContext(bundle.replace('return { inject, apply, createMediaAutoplayGate, modelForMessage }', 'return { TurnModelBadge }'), {
     window: { __ModuleLoader__: { load(value) { entry = value } } },
   })
   const { TurnModelBadge } = entry.factory(name => name === 'react' ? {

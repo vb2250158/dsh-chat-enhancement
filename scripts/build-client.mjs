@@ -32,6 +32,6 @@ ${goalMetrics}
 ${codeReferences}
 ${codeReferencesClient}
 ${client}
-    return { inject, apply, createMediaAutoplayGate, modelForMessage, thinkRowTarget, thinkRowExpanded, expandRunningThinkRow, collapseSettledThinkRow }
+    return { inject, apply, createMediaAutoplayGate, modelForMessage }
   },
 })\n`)

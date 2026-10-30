@@ -8,7 +8,7 @@ const root = new URL('..', import.meta.url)
 test('generated preview preserves native image priority over text media markers', async () => {
   const bundle = await readFile(new URL('./lib/client.js', root), 'utf8')
   let entry
-  vm.runInNewContext(bundle.replace('return { inject, apply, createMediaAutoplayGate, modelForMessage, thinkRowTarget, thinkRowExpanded, expandRunningThinkRow, collapseSettledThinkRow }', 'return { previewFromBlock }'), {
+  vm.runInNewContext(bundle.replace('return { inject, apply, createMediaAutoplayGate, modelForMessage }', 'return { previewFromBlock }'), {
     window: { __ModuleLoader__: { load(value) { entry = value } } },
   })
   const { previewFromBlock } = entry.factory(() => ({}))
@@ -106,34 +106,8 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.match(client, /videoAutoplay/)
   assert.match(client, /toolDescriptions/)
   assert.match(client, /显示模型自述的本次调用说明/)
-  // 推理中自动展开：插件只驱动 DSH 自带的 Think 行展开控件，不接管渲染。
-  assert.match(client, /expandReasoningWhileRunning/)
-  assert.match(client, /推理中自动展开/)
-  assert.match(client, /ReasoningAutoExpandController/)
-  assert.match(client, /data-variant="think"/)
-  assert.match(client, /\[data-disclosure-row\]\[data-expandable\]/)
-  assert.match(client, /chat-enhancement-reasoning-auto-expand/)
-  // 直接写 data-expanded 会被 React 的 useState 覆盖，必须走真实点击。
-  assert.doesNotMatch(client, /setAttribute\('data-expanded'/)
-  assert.match(client, /MarkdownText/)
-  assert.match(client, /conversation\.input\.dock/)
-  assert.match(client, /ToolCallGroupController/)
-  assert.match(client, /chatFlowKind/)
-  assert.match(client, /isGroupedActivity/)
-  assert.match(client, /kind === 'context'/)
-  assert.match(client, /已执行 \$\{count\} 项操作/)
-  assert.match(client, /--dsw-alias-label-secondary/)
-  assert.match(client, /ThinkingGroupController/)
-  assert.match(client, /data-chat-flow-key/)
-  assert.match(client, /think:\$\{index\}/)
-  assert.match(client, /已完成 \$\{count\} 项思考/)
-  assert.match(client, /parentNodes: \(\) => document\.querySelectorAll\('\[data-chat-flow-key\]'\)/)
-  assert.match(client, /inlineTrailingActivity/)
-  assert.match(client, /isDisplayToolRow/)
-  assert.match(client, /data-dsh-chat-enhancement/)
-  assert.match(client, /row\.insertBefore\(button, content\)/)
-  assert.match(client, /MutationObserver/)
-  assert.doesNotMatch(client, /key: 'tool-call', priority: -1/)
+  assert.doesNotMatch(client, /chat-enhancement-(?:tool-groups|thinking-groups|reasoning-auto-expand)/)
+  assert.doesNotMatch(client, /expandReasoningWhileRunning|reasoningCollapseDelayMs|createActivityGroupController/)
   assert.match(client, /readAttachment/)
   assert.doesNotMatch(client, /file:\/\//)
   assert.match(host, /name: 'show_image'/)
@@ -169,8 +143,7 @@ test('declares the media bundle, browser previews, and bounded Markdown reader',
   assert.doesNotMatch(host, /## Language Preference/)
   // 工具行自述：模型侧靠装配期注入属性，显示侧靠 patches/ 里的官方补丁。
   assert.match(host, /toolDescriptions: z\.boolean\(\)\.default\(true\)/)
-  // 纯展示偏好，Host 只负责持久化。
-  assert.match(host, /expandReasoningWhileRunning: z\.boolean\(\)\.default\(false\)/)
+  assert.doesNotMatch(host, /expandReasoningWhileRunning|reasoningCollapseDelayMs/)
   assert.match(host, /settingsCtx\.on\('system-prompt\/assemble'/)
   assert.match(host, /return describeTools\(assembly, toolDescriptionHint\(current\.language\)\)/)
   assert.ok(host.indexOf('const ChatMediaService = createMediaService') < host.indexOf("ctx.inject(['agents']"))
@@ -266,60 +239,6 @@ test('show_image writes its managed attachment into the session tool result', as
     name: 'track.mp3',
     bytes: 3,
   })
-})
-
-test('client groups original tool and context rows without replacing the tool-call node', async () => {
-  const plugin = await loadBrowserPlugin()
-  const registrations = []
-  const context = {
-    effect(callback) { callback() },
-    locale: { register(namespace, dictionaries) { assert.ok(['chat-enhancement-session-statistics', 'chat-enhancement-goal-metrics', 'chat-enhancement-question-content', 'chat-enhancement-annotations', 'chat-enhancement-jobs', 'chat-enhancement-recovery', 'chat-enhancement-titles'].includes(namespace)); assert.ok(dictionaries.en); return () => {} } },
-    remote: { async $mount() { return () => {} } },
-    get(name) { return name === 'sessions' ? { binding() {} } : undefined },
-    reflect: { provide: () => () => {}, get(name) {
-      if (name === 'remote.chatMedia') return { async read() { return { ok: true, value: {} } } }
-      if (name === 'remote.chatMarkdown') return { async read() { return { ok: true, value: {} } } }
-      return undefined
-    } },
-    slots: {
-      inject(_name, callback) { callback() },
-      register(options, component) { registrations.push({ options, component }); return () => {} },
-    },
-    configForms: {
-      get(entryId) {
-        assert.equal(entryId, 'chat-enhancement')
-        return {
-          getSnapshot() { return { status: 'ready', value: { audioAutoplay: false, videoAutoplay: false }, writable: true } },
-          subscribe() { return () => {} },
-          async set() {},
-        }
-      },
-    },
-  }
-
-  await plugin.apply(context)
-  assert.ok(plugin.inject.includes('configForms'))
-  const jobList = registrations.find(({ options }) => options.id === 'job-list')
-  assert.equal(jobList.options.name, 'conversation.session.header.actions')
-  assert.equal(jobList.options.priority, 100)
-  assert.equal(jobList.component.name, 'BackgroundJobList')
-  assert.equal(registrations.some(({ options }) => options.name === 'conversation.chat.node'), false)
-  const autoplayController = registrations.find(({ options }) => options.id === 'chat-enhancement-media-autoplay-session')
-  assert.equal(autoplayController.options.name, 'conversation.input.dock')
-  assert.equal(autoplayController.component.name, 'MediaAutoplaySessionController')
-  const groupController = registrations.find(({ options }) => options.id === 'chat-enhancement-tool-groups')
-  assert.equal(groupController.options.name, 'conversation.input.dock')
-  assert.equal(groupController.component.name, 'ToolCallGroupController')
-  const thinkingController = registrations.find(({ options }) => options.id === 'chat-enhancement-thinking-groups')
-  assert.equal(thinkingController.options.name, 'conversation.input.dock')
-  assert.equal(thinkingController.component.name, 'ThinkingGroupController')
-  const audioView = registrations.find(({ options }) => options.key === 'show_audio')
-  assert.equal(audioView.options.name, 'tool.call.toolview')
-  assert.equal(registrations.filter(({ options }) => options.name === 'settings.section').length, 0)
-  const sections = registrations.filter(({ options }) => options.name === 'plugins.bundle.config')
-  assert.equal(sections.length, 1)
-  assert.equal(sections[0].options.key, 'dsh-chat-enhancement')
-  assert.equal(sections[0].component.name, 'ChatEnhancementSettingsSection')
 })
 
 test('autoplay gate ignores restored history and only accepts a newly settled Agent display', async () => {
@@ -469,161 +388,6 @@ test('only a concrete language contributes a prompt section', async () => {
   assert.match(languageInstruction('ja'), /常に日本語で考え、日本語で回答してください。/)
   assert.match(languageInstruction('ar'), /Arabic \(العربية\)/)
   assert.match(languageInstruction('ar'), /فكّر وأجب دائمًا بالعربية\./)
-})
-
-/**
- * bundle 用 `instanceof HTMLElement` 判定目标元素；Node 没有该全局，因此注入
- * 一个共同的桩类，让 `thinkRowTarget` 的判定在测试里按同样规则生效。
- */
-class HTMLElementStub {}
-
-/**
- * 最小 DOM 桩：只为验证「推理中自动展开」控制器驱动的那套交互。
- *
- * 真实行由 React 渲染，`data-expanded` 是 `useState` 的投影；控制器必须点它
- * 自带的 disclosure 目标，直接改属性会在下一次渲染被覆盖。桩因此把
- * `click()` 实现成「翻转 data-expanded」，与 React 的可观察行为一致。
- */
-function thinkRowStub(state) {
-  class Target extends HTMLElementStub {
-    clicks = 0
-    click() {
-      this.clicks += 1
-      if (row.dataset.expanded === undefined) row.dataset.expanded = ''
-      else delete row.dataset.expanded
-    }
-  }
-  const target = new Target()
-  const row = {
-    isConnected: true,
-    dataset: { variant: 'think', state },
-    querySelector(selector) {
-      return selector === '[data-disclosure-row][data-expandable]' ? target : null
-    },
-  }
-  return { row, target }
-}
-
-/** 把 bundle 里的自动展开辅助函数取出来，用最小 DOM 桩驱动。 */
-async function loadAutoExpandHelpers() {
-  const client = await readFile(new URL('./lib/client.js', root), 'utf8')
-  let loaderEntry
-  vm.runInNewContext(client.replace('return { inject, apply,', 'return { createReasoningCollapseQueue, inject, apply,'), {
-    setTimeout, clearTimeout,
-    HTMLElement: HTMLElementStub,
-    window: { __ModuleLoader__: { load(entry) { loaderEntry = entry } } },
-  })
-  return loaderEntry.factory((name) => {
-    if (name === '@deepseek-ai/dsh-client-ui-goal') return {}
-    if (name === 'react') return { createElement() {}, useState() { return [false, () => {}] }, useEffect() {} }
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return { MarkdownText() {}, Button() {}, Menu() {}, IconChevronDownOutlineRegular() {} }
-    throw new Error(`unexpected browser dependency: ${name}`)
-  })
-}
-
-test('推理中自动展开只开流式中的行，并在结算后收起自己开过的行', async () => {
-  const { thinkRowTarget, thinkRowExpanded, expandRunningThinkRow, collapseSettledThinkRow } = await loadAutoExpandHelpers()
-
-  const running = thinkRowStub('running')
-  assert.ok(thinkRowTarget(running.row), '折叠行必须解析出 disclosure 目标')
-  assert.equal(thinkRowExpanded(running.row), false)
-
-  // 思考中：展开，且只点一次（重复 sync 不得反复抖动）。
-  expandRunningThinkRow(running.row)
-  assert.equal(running.target.clicks, 1)
-  assert.equal(thinkRowExpanded(running.row), true)
-  expandRunningThinkRow(running.row)
-  assert.equal(running.target.clicks, 1, '已展开的行不得被再次点击')
-
-  // 结算：控制器开过的行收起。
-  running.row.dataset.state = 'ok'
-  collapseSettledThinkRow(running.row)
-  assert.equal(running.target.clicks, 2)
-  assert.equal(thinkRowExpanded(running.row), false)
-
-  // 用户手工展开的行不属于控制器，结算时保持原样。
-  const manual = thinkRowStub('running')
-  manual.row.dataset.expanded = ''
-  expandRunningThinkRow(manual.row)
-  assert.equal(manual.target.clicks, 0, '用户已展开的行不得被控制器接管')
-  manual.row.dataset.state = 'ok'
-  collapseSettledThinkRow(manual.row)
-  assert.equal(manual.target.clicks, 0, '用户手工展开的行不得被自动收起')
-  assert.equal(thinkRowExpanded(manual.row), true)
-
-  // 不可展开的行（无 disclosure 目标）必须安全跳过。
-  const inert = { dataset: { variant: 'think', state: 'running' }, querySelector: () => null }
-  assert.equal(thinkRowTarget(inert), null)
-  expandRunningThinkRow(inert)
-  collapseSettledThinkRow(inert)
-})
-
-test('推理完成保持 3 秒，重复更新不重置折叠计时', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  const { createReasoningCollapseQueue, thinkRowExpanded } = await loadAutoExpandHelpers()
-  const queue = createReasoningCollapseQueue(3000)
-  const { row, target } = thinkRowStub('running')
-  queue.sync([row])
-  row.dataset.state = 'ok'
-  queue.sync([row])
-  t.mock.timers.tick(2999)
-  queue.sync([row])
-  assert.equal(thinkRowExpanded(row), true)
-  t.mock.timers.tick(1)
-  assert.equal(thinkRowExpanded(row), false)
-  assert.equal(target.clicks, 2)
-  queue.dispose()
-})
-
-test('再次推理重新计时，移除或卸载取消未完成折叠', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  const { createReasoningCollapseQueue, thinkRowExpanded } = await loadAutoExpandHelpers()
-  const queue = createReasoningCollapseQueue(3000)
-  const { row } = thinkRowStub('running')
-  queue.sync([row])
-  row.dataset.state = 'ok'
-  queue.sync([row])
-  t.mock.timers.tick(1000)
-  row.dataset.state = 'running'
-  queue.sync([row])
-  t.mock.timers.tick(3000)
-  assert.equal(thinkRowExpanded(row), true)
-  row.dataset.state = 'ok'
-  queue.sync([row])
-  t.mock.timers.tick(2999)
-  assert.equal(thinkRowExpanded(row), true)
-  t.mock.timers.tick(1)
-  assert.equal(thinkRowExpanded(row), false)
-  for (const remove of [() => queue.sync([]), () => queue.dispose()]) {
-    row.dataset.state = 'running'
-    queue.sync([row])
-    row.dataset.state = 'ok'
-    queue.sync([row])
-    remove()
-    t.mock.timers.tick(3000)
-    assert.equal(thinkRowExpanded(row), true)
-    delete row.dataset.expanded
-  }
-})
-
-test('手动展开保持原样，关闭功能可立即收起自动展开行', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  const { createReasoningCollapseQueue, collapseSettledThinkRow, thinkRowExpanded } = await loadAutoExpandHelpers()
-  const queue = createReasoningCollapseQueue(3000)
-  const manual = thinkRowStub('running').row
-  manual.dataset.expanded = ''
-  const automatic = thinkRowStub('running').row
-  queue.sync([manual, automatic])
-  manual.dataset.state = automatic.dataset.state = 'ok'
-  queue.sync([manual, automatic])
-  t.mock.timers.tick(1000)
-  queue.dispose()
-  collapseSettledThinkRow(manual)
-  collapseSettledThinkRow(automatic)
-  assert.equal(thinkRowExpanded(manual), true)
-  assert.equal(thinkRowExpanded(automatic), false)
-  t.mock.timers.tick(3000)
-  assert.equal(thinkRowExpanded(manual), true)
 })
 
 test('language anchors fire only when the reply language has actually drifted', async () => {

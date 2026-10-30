@@ -543,11 +543,6 @@ export function apply(ctx, config = {}) {
 const CHAT_SETTINGS_FIELDS = {
       audioAutoplay: z.boolean().default(false).volatile(),
       videoAutoplay: z.boolean().default(false).volatile(),
-      // Purely presentational: the browser half drives DSH's own Think-row
-      // disclosure while reasoning streams. The Host only persists it, because
-      // a browser-local store would not survive a reload or reach another tab.
-      expandReasoningWhileRunning: z.boolean().default(false).volatile(),
-      reasoningCollapseDelayMs: z.number().min(0).step(1).default(3000).volatile(),
       codeReferenceHighlightMs: z.number().min(100).max(10000).step(1).default(1600).volatile(),
       language: z.string().default(AUTO_LANGUAGE).volatile(),
       // The allowed ids come from the shared catalog, so the browser picker and

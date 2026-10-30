@@ -76,21 +76,23 @@ test('生成的插件使用真实原语显示后台说明，支持开关、会�
     assert.equal(document.querySelector('#app button'), null)
     const settings = registrations.find(item => item.options.key === 'dsh-chat-enhancement' && item.options.name === 'plugins.bundle.config')
     React.act(() => root.render(React.createElement(settings.component, { chatSettings })))
+    assert.ok(registrations.every(item => !/chat-enhancement-(tool-groups|thinking-groups|reasoning-auto-expand)/.test(item.options.id ?? '')))
+    assert.doesNotMatch(document.querySelector('#app').textContent, /推理中自动展开|思考行/)
     const switches = [...document.querySelectorAll('[role="switch"]')]
-    assert.equal(switches.length, 4)
+    assert.equal(switches.length, 3)
     assert.equal(document.querySelector('input[type="checkbox"]'), null)
     for (const control of switches) {
       assert.equal(control.tagName, 'BUTTON')
       assert.ok(control.getAttribute('aria-label'))
       React.act(() => control.click())
     }
-    assert.deepEqual(writes, [['expandReasoningWhileRunning', true], ['toolDescriptions', true], ['audioAutoplay', true], ['videoAutoplay', true]])
+    assert.deepEqual(writes, [['toolDescriptions', true], ['audioAutoplay', true], ['videoAutoplay', true]])
     React.act(() => { snapshot = { ...snapshot, writable: false }; for (const listener of listeners) listener() })
     for (const control of document.querySelectorAll('[role="switch"]')) {
       assert.equal(control.disabled, true)
       React.act(() => control.click())
     }
-    assert.equal(writes.length, 4)
+    assert.equal(writes.length, 3)
     const recovery = registrations.find(item => item.options.id === 'chat-enhancement-recovery')
     assert.equal(recovery.options.name, 'sidebar.footer.action')
     const recoveryText = key => dictionaries.get(recovery.options.locale).zh[key]
