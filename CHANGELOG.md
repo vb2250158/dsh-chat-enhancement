@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased development source
+
+- Preserve isolated attachment UI experiments with public controls, focus-safe preview, synthetic browser checks and no composer registration; remove unverified illustration assets.
+- Keep the language and session-reference proposals generic and explicit about current implementation status. Add six plugin-list metadata languages for both plugin entries.
+- 保存未接入 composer 的附件 UI 实验、独立合成浏览器验证与脱敏设计文档；补齐两个插件入口的六种列表元数据语言，不改变当前安装 pin。
+
+
 ## 0.3.84 (2026-10-30)
 
 - 补齐客户端 `remote.session` 注入，修复空模型目录缓存下运行中及回复操作行的模型标签；保留官方折叠与共享模型选择。

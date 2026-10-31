@@ -411,3 +411,9 @@ The plugin list shows **Chat enhancements** in English and **聊天增强** in C
 在插件列表中点击本插件进入详情页，即可使用原有配置和操作界面；设置菜单不再重复显示该插件入口。
 
 The icon uses a centered 36 × 36 viewBox to leave more space around the artwork inside the plugin icon frame.
+
+## Experimental source / 实验源码
+
+Source-only attachment UI components and their isolated verification command are documented in [src/attachments/README.md](src/attachments/README.md). They are not integrated into the released composer or its upload flow.
+
+附件 UI 实验源码及独立验证命令见上述文档；它们尚未接入正式 composer 或上传流程。两份根目录 PLAN 文档分别说明已实现的语言提醒与待评审的会话拖拽提案。
